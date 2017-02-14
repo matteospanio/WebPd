@@ -1,7 +1,6 @@
 var _ = require('underscore')
   , assert = require('assert')
   , EventEmitter = require('events').EventEmitter
-  , waatest = require('waatest')
   , portlets = require('../lib/waa/portlets')
   , PdObject = require('../lib/core/PdObject')
   , Pd = require('../index')
@@ -20,29 +19,6 @@ exports.beforeEach = function() {
   pdGlob.library['testingmailbox'] = TestingMailBox
 }
 
-exports.expectSamples = function(onStarted, expected, done) {
-  waatest.utils.expectSamples(function(context) {
-    var channelCount = expected.length
-      , audio = new TestAudio(channelCount, context)
-    Pd.start({audio: audio})
-    onStarted()
-  }, expected, function(err) {
-    Pd.stop()
-    done(err)
-  })
-}
-
-exports.renderSamples = function(channelCount, frameCount, onStarted, done) {
-  waatest.utils.renderSamples(channelCount, frameCount, function(context) {
-    var audio = new TestAudio(channelCount, context)
-    Pd.start({audio: audio})
-    onStarted()
-  }, function(err, block) {
-    Pd.stop()
-    done(err, block)
-  })
-}
-
 exports.assertPreservesTimeTag = function(pdObject, args) {
   var mailbox = pdObject.patch.createObject('testingmailbox')
     , timeTag = Math.random()
@@ -50,6 +26,16 @@ exports.assertPreservesTimeTag = function(pdObject, args) {
   pdObject.o(0).connect(mailbox.i(0))
   pdObject.i(0).message(args)
   assert.equal(mailbox.rawReceived[0].timeTag, timeTag)
+}
+
+var round = function(num, dec) {
+  return Math.round(num * Math.pow(10, dec)) / Math.pow(10, dec)
+}
+
+exports.assertAboutEqual = function(array1, array2) {
+  array1 = _.map(array1, function(val) { return round(val, 6) })
+  array2 = _.map(array2, function(val) { return round(val, 6) })
+  assert.deepEqual(array1, array2)
 }
 
 var TestingMailBox = exports.TestingMailBox = PdObject.extend({
@@ -72,34 +58,26 @@ var TestingMailBox = exports.TestingMailBox = PdObject.extend({
   outletDefs: [ portlets.Outlet ]
 })
 
-// Audio engine for testing
-var TestAudio = function(channelCount, context) {
-  var ch
-  Object.defineProperty(this, 'time', {
-    get: function() { return context.currentTime * 1000 }
-  })
-  this.context = context
-  this.sampleRate = context.sampleRate
-  this._channelMerger = this.context.createChannelMerger(channelCount)
-  this._channelMerger.connect(this.context.destination)
-  this.channels = []
-  for (ch = 0; ch < channelCount; ch++) {
-    this.channels.push(this.context.createGain())
-    this.channels[ch].connect(this._channelMerger, 0, ch)
-  }
+var TestAudio = exports.TestAudio = function() {
+  this.time = 0
+  this.sampleRate = 44100
+  this.blockSize = 4096
+  this.channelCount = 2
+  this.buffer = []
 }
+
 TestAudio.prototype.start = function() {}
 TestAudio.prototype.stop = function() {}
 
+
 var TestClock = exports.TestClock = function() {
   this.events = []
-  this.time = 0
 }
 
 TestClock.prototype.schedule = function(func, time, repetition) {
   var event = { func: func, timeTag: time, repetition: repetition }
   this.events.push(event)
-  if (event.timeTag === this.time) event.func(event)
+  if (event.timeTag === pdGlob.audio.time) event.func(event)
   return event
 }
 
@@ -109,10 +87,10 @@ TestClock.prototype.tick = function() {
   var self = this
   this.events.forEach(function(e) {
     if (e.repetition) {
-      if (self.time >= e.timeTag && ((self.time - e.timeTag) % e.repetition) === 0) { 
-        var e = _.extend(e, { timeTag: self.time })
+      if (pdGlob.audio.time >= e.timeTag && ((pdGlob.audio.time - e.timeTag) % e.repetition) === 0) { 
+        var e = _.extend(e, { timeTag: pdGlob.audio.time })
         e.func(e)
       }
-    } else if (e.timeTag === self.time) e.func(e)
+    } else if (e.timeTag === pdGlob.audio.time) e.func(e)
   })
 }

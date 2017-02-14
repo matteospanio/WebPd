@@ -1,186 +1,3 @@
-/* Copyright 2013 Chris Wilson
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
-
-/*
-
-This monkeypatch library is intended to be included in projects that are
-written to the proper AudioContext spec (instead of webkitAudioContext),
-and that use the new naming and proper bits of the Web Audio API (e.g.
-using BufferSourceNode.start() instead of BufferSourceNode.noteOn()), but may
-have to run on systems that only support the deprecated bits.
-
-This library should be harmless to include if the browser supports
-unprefixed "AudioContext", and/or if it supports the new names.
-
-The patches this library handles:
-if window.AudioContext is unsupported, it will be aliased to webkitAudioContext().
-if AudioBufferSourceNode.start() is unimplemented, it will be routed to noteOn() or
-noteGrainOn(), depending on parameters.
-
-The following aliases only take effect if the new names are not already in place:
-
-AudioBufferSourceNode.stop() is aliased to noteOff()
-AudioContext.createGain() is aliased to createGainNode()
-AudioContext.createDelay() is aliased to createDelayNode()
-AudioContext.createScriptProcessor() is aliased to createJavaScriptNode()
-AudioContext.createPeriodicWave() is aliased to createWaveTable()
-OscillatorNode.start() is aliased to noteOn()
-OscillatorNode.stop() is aliased to noteOff()
-OscillatorNode.setPeriodicWave() is aliased to setWaveTable()
-AudioParam.setTargetAtTime() is aliased to setTargetValueAtTime()
-
-This library does NOT patch the enumerated type changes, as it is
-recommended in the specification that implementations support both integer
-and string types for AudioPannerNode.panningModel, AudioPannerNode.distanceModel
-BiquadFilterNode.type and OscillatorNode.type.
-
-*/
-(function (global, exports, perf) {
-  'use strict';
-
-  function fixSetTarget(param) {
-    if (!param)	// if NYI, just return
-      return;
-    if (!param.setTargetAtTime)
-      param.setTargetAtTime = param.setTargetValueAtTime;
-  }
-
-  if (window.hasOwnProperty('webkitAudioContext') &&
-      !window.hasOwnProperty('AudioContext')) {
-    window.AudioContext = webkitAudioContext;
-
-    if (!AudioContext.prototype.hasOwnProperty('createGain'))
-      AudioContext.prototype.createGain = AudioContext.prototype.createGainNode;
-    if (!AudioContext.prototype.hasOwnProperty('createDelay'))
-      AudioContext.prototype.createDelay = AudioContext.prototype.createDelayNode;
-    if (!AudioContext.prototype.hasOwnProperty('createScriptProcessor'))
-      AudioContext.prototype.createScriptProcessor = AudioContext.prototype.createJavaScriptNode;
-    if (!AudioContext.prototype.hasOwnProperty('createPeriodicWave'))
-      AudioContext.prototype.createPeriodicWave = AudioContext.prototype.createWaveTable;
-
-
-    AudioContext.prototype.internal_createGain = AudioContext.prototype.createGain;
-    AudioContext.prototype.createGain = function() {
-      var node = this.internal_createGain();
-      fixSetTarget(node.gain);
-      return node;
-    };
-
-    AudioContext.prototype.internal_createDelay = AudioContext.prototype.createDelay;
-    AudioContext.prototype.createDelay = function(maxDelayTime) {
-      var node = maxDelayTime ? this.internal_createDelay(maxDelayTime) : this.internal_createDelay();
-      fixSetTarget(node.delayTime);
-      return node;
-    };
-
-    AudioContext.prototype.internal_createBufferSource = AudioContext.prototype.createBufferSource;
-    AudioContext.prototype.createBufferSource = function() {
-      var node = this.internal_createBufferSource();
-      if (!node.start) {
-        node.start = function ( when, offset, duration ) {
-          if ( offset || duration )
-            this.noteGrainOn( when || 0, offset, duration );
-          else
-            this.noteOn( when || 0 );
-        };
-      } else {
-        node.internal_start = node.start;
-        node.start = function( when, offset, duration ) {
-          if( typeof duration !== 'undefined' )
-            node.internal_start( when || 0, offset, duration );
-          else
-            node.internal_start( when || 0, offset || 0 );
-        };
-      }
-      if (!node.stop) {
-        node.stop = function ( when ) {
-          this.noteOff( when || 0 );
-        };
-      } else {
-        node.internal_stop = node.stop;
-        node.stop = function( when ) {
-          node.internal_stop( when || 0 );
-        };
-      }
-      fixSetTarget(node.playbackRate);
-      return node;
-    };
-
-    AudioContext.prototype.internal_createDynamicsCompressor = AudioContext.prototype.createDynamicsCompressor;
-    AudioContext.prototype.createDynamicsCompressor = function() {
-      var node = this.internal_createDynamicsCompressor();
-      fixSetTarget(node.threshold);
-      fixSetTarget(node.knee);
-      fixSetTarget(node.ratio);
-      fixSetTarget(node.reduction);
-      fixSetTarget(node.attack);
-      fixSetTarget(node.release);
-      return node;
-    };
-
-    AudioContext.prototype.internal_createBiquadFilter = AudioContext.prototype.createBiquadFilter;
-    AudioContext.prototype.createBiquadFilter = function() {
-      var node = this.internal_createBiquadFilter();
-      fixSetTarget(node.frequency);
-      fixSetTarget(node.detune);
-      fixSetTarget(node.Q);
-      fixSetTarget(node.gain);
-      return node;
-    };
-
-    if (AudioContext.prototype.hasOwnProperty( 'createOscillator' )) {
-      AudioContext.prototype.internal_createOscillator = AudioContext.prototype.createOscillator;
-      AudioContext.prototype.createOscillator = function() {
-        var node = this.internal_createOscillator();
-        if (!node.start) {
-          node.start = function ( when ) {
-            this.noteOn( when || 0 );
-          };
-        } else {
-          node.internal_start = node.start;
-          node.start = function ( when ) {
-            node.internal_start( when || 0);
-          };
-        }
-        if (!node.stop) {
-          node.stop = function ( when ) {
-            this.noteOff( when || 0 );
-          };
-        } else {
-          node.internal_stop = node.stop;
-          node.stop = function( when ) {
-            node.internal_stop( when || 0 );
-          };
-        }
-        if (!node.setPeriodicWave)
-          node.setPeriodicWave = node.setWaveTable;
-        fixSetTarget(node.frequency);
-        fixSetTarget(node.detune);
-        return node;
-      };
-    }
-  }
-
-  if (window.hasOwnProperty('webkitOfflineAudioContext') &&
-      !window.hasOwnProperty('OfflineAudioContext')) {
-    window.OfflineAudioContext = webkitOfflineAudioContext;
-  }
-
-}(window));
-
-
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
@@ -209,8 +26,8 @@ var _ = require('underscore')
   , PdObject = require('./lib/core/PdObject')
   , mixins = require('./lib/core/mixins')
   , errors = require('./lib/core/errors')
-  , portlets = require('./lib/waa/portlets')
-  , waa = require('./lib/waa/interfaces')
+  , portlets = require('./lib/js-dsp/portlets')
+  , jsDsp = require('./lib/js-dsp/interfaces')
   , pdGlob = require('./lib/global')
   , interfaces = require('./lib/core/interfaces')
   , patchIds = _.extend({}, mixins.UniqueIdsMixin)
@@ -227,26 +44,27 @@ var Pd = module.exports = {
     if (!pdGlob.isStarted) {
 
       if (typeof AudioContext !== 'undefined') {
-        pdGlob.audio = opts.audio || new waa.Audio({
-          channelCount : pdGlob.settings.channelCount,
-          audioContext: opts.audioContext
+        pdGlob.audio = opts.audio || new jsDsp.Audio({
+          audioContext: opts.audioContext || new AudioContext
         })
-        pdGlob.clock = opts.clock || new waa.Clock({
+        pdGlob.clock = opts.clock || new jsDsp.Clock({
           audioContext: pdGlob.audio.context,
-          waaClock: opts.waaClock
         })
-        pdGlob.midi = opts.midi || new waa.Midi()
+        pdGlob.midi = opts.midi || new jsDsp.Midi()
 
       // TODO : handle other environments better than like this
       } else {
         pdGlob.audio = opts.audio || interfaces.Audio
         pdGlob.clock = opts.clock || interfaces.Clock
+        
+        pdGlob.clock = opts.clock || new jsDsp.Clock()
+        
         pdGlob.midi = opts.midi || interfaces.Midi
       }
 
       if (opts.storage) pdGlob.storage = opts.storage
       else if (typeof window !== 'undefined')
-        pdGlob.storage = new waa.Storage()
+        pdGlob.storage = new jsDsp.Storage()
       else pdGlob.storage = interfaces.Storage
 
       pdGlob.midi.onMessage(function(midiMessage) {
@@ -394,6 +212,7 @@ var Pd = module.exports = {
   },
 
   core: {
+    interfaces: jsDsp,
     PdObject: PdObject,
     portlets: portlets,
     errors: errors
@@ -405,8 +224,8 @@ var Pd = module.exports = {
 }
 
 if (typeof window !== 'undefined') window.Pd = Pd
-
-},{"./lib/core/Abstraction":3,"./lib/core/Patch":5,"./lib/core/PdObject":6,"./lib/core/errors":7,"./lib/core/interfaces":8,"./lib/core/mixins":9,"./lib/global":12,"./lib/index":14,"./lib/waa/interfaces":17,"./lib/waa/portlets":18,"pd-fileutils.parser":34,"underscore":36}],2:[function(require,module,exports){
+else if (typeof self !== 'undefined') self.Pd = Pd
+},{"./lib/core/Abstraction":3,"./lib/core/Patch":5,"./lib/core/PdObject":6,"./lib/core/errors":7,"./lib/core/interfaces":8,"./lib/core/mixins":9,"./lib/global":12,"./lib/index":14,"./lib/js-dsp/interfaces":16,"./lib/js-dsp/portlets":18,"pd-fileutils.parser":37,"underscore":39}],2:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -689,7 +508,7 @@ exports.declareObjects = function(library) {
 
   })
 }
-},{"./core/Patch":5,"./core/PdObject":6,"./core/mixins":9,"./core/utils":11,"./global":12,"./waa/portlets":18,"events":19,"underscore":36}],3:[function(require,module,exports){
+},{"./core/Patch":5,"./core/PdObject":6,"./core/mixins":9,"./core/utils":11,"./global":12,"./waa/portlets":21,"events":22,"underscore":39}],3:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -726,7 +545,7 @@ _.extend(Abstraction.prototype, Patch.prototype, {
   }
 
 })
-},{"./Patch":5,"underscore":36}],4:[function(require,module,exports){
+},{"./Patch":5,"underscore":39}],4:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -780,9 +599,6 @@ var BaseNode = module.exports = function(patch, id, args) {
 _.extend(BaseNode.prototype, {
 
 /******************** Methods to implement *****************/
-
-  // True if the node is an endpoint of the graph (e.g. [dac~])
-  endPoint: false,
 
   // The node will process its arguments by automatically replacing
   // abbreviations such as 'f' or 'b', and replacing dollar-args
@@ -838,7 +654,7 @@ _.extend(BaseNode.prototype, {
 })
 
 
-},{"./errors":7,"./portlets":10,"./utils":11,"underscore":36,"util":23}],5:[function(require,module,exports){
+},{"./errors":7,"./portlets":10,"./utils":11,"underscore":39,"util":26}],5:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -871,7 +687,6 @@ var _ = require('underscore')
 var Patch = module.exports = function() {
   BaseNode.apply(this, arguments)
   this.objects = []
-  this.endPoints = []
   // A globally unique id for the patch.
   // Should stay null if the patch is a subpatch.
   // Instance of an abstraction on the other hand should have a `patchId`.
@@ -879,7 +694,6 @@ var Patch = module.exports = function() {
   // The patch data in simple pd-json format
   // see : https://github.com/sebpiq/pd-fileutils#specification
   this.patchData = null
-  this.blockSize = pdGlob.settings.blockSize
 }
 
 _.extend(Patch.prototype, BaseNode.prototype, mixins.UniqueIdsMixin, EventEmitter.prototype, {
@@ -958,7 +772,6 @@ _.extend(Patch.prototype, BaseNode.prototype, mixins.UniqueIdsMixin, EventEmitte
 
     // Assign object unique id and add it to the patch
     this.objects[obj.id] = obj
-    if (obj.endPoint) this.endPoints.push(obj)
 
     // When [inlet], [outlet~], ... is added to a patch, we add their portlets
     // to the patch's portlets
@@ -1012,7 +825,7 @@ var isOutletObject = function(obj) {
   })
 }
 
-},{"../global":12,"./BaseNode":4,"./errors":7,"./mixins":9,"./utils":11,"events":19,"underscore":36}],6:[function(require,module,exports){
+},{"../global":12,"./BaseNode":4,"./errors":7,"./mixins":9,"./utils":11,"events":22,"underscore":39}],6:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -1050,7 +863,7 @@ _.extend(PdObject.prototype, BaseNode.prototype, {
   doResolveArgs: true
 })
 
-},{"../global":12,"./BaseNode":4,"./Patch":5,"./portlets":10,"./utils":11,"underscore":36,"util":23}],7:[function(require,module,exports){
+},{"../global":12,"./BaseNode":4,"./Patch":5,"./portlets":10,"./utils":11,"underscore":39,"util":26}],7:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -1104,7 +917,7 @@ var InvalidPortletError = exports.InvalidPortletError = function InvalidPortletE
 }
 InvalidPortletError.prototype = Object.create(Error.prototype)
 InvalidPortletError.prototype.constructor = InvalidPortletError
-},{"underscore":36}],8:[function(require,module,exports){
+},{"underscore":39}],8:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -1128,9 +941,6 @@ InvalidPortletError.prototype.constructor = InvalidPortletError
 // Scheduler to handle timing
 exports.Clock = {
 
-  // Current time of the clock in milliseconds
-  time: 0,
-
   // Schedules `func(event)` to run at `time` and to repeat every `repetition` millisecond.
   // Returns an `Event`, that has attribute `timeTag`, which is the time at which it is scheduled.
   // If `time` is now, event must be executed immediately.
@@ -1143,8 +953,17 @@ exports.Clock = {
 // Audio engine
 exports.Audio = {
 
+  // Current time of audio process in milliseconds
+  time: 0,
+
   // The current sample rate of audio processing
   sampleRate: 44100,
+
+  // Current block size
+  blockSize: 16384,
+
+  // Current number of channels
+  channelCount: 2,
 
   // Start the audio
   start: function() {},
@@ -1352,7 +1171,7 @@ _.extend(EventReceiver.prototype, {
 })
 
 EventReceiver.prototype.on = EventReceiver.prototype.addListener
-},{"../global":12,"events":19,"underscore":36}],10:[function(require,module,exports){
+},{"../global":12,"events":22,"underscore":39}],10:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -1461,7 +1280,7 @@ var UnimplementedPortlet = Portlet.extend({
 })
 exports.UnimplementedInlet = UnimplementedPortlet.extend({ portletType: 'inlet' })
 exports.UnimplementedOutlet = UnimplementedPortlet.extend({ portletType: 'outlet' })
-},{"./errors":7,"./utils":11,"underscore":36}],11:[function(require,module,exports){
+},{"./errors":7,"./utils":11,"underscore":39}],11:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -1579,11 +1398,11 @@ exports.timeTag = function(args, timeTag) {
 
 
 // Helper function to get the timeTag of a list of arguments.
-// Returns current clock time if `args` is not time tagged.
+// Returns current audio time if `args` is not time tagged.
 exports.getTimeTag = function(args) {
-  return (args && args.timeTag) || (pdGlob.clock && pdGlob.clock.time) || 0
+  return (args && args.timeTag) || (pdGlob.audio && pdGlob.audio.time) || 0
 }
-},{"../global":12,"underscore":36}],12:[function(require,module,exports){
+},{"../global":12,"underscore":39}],12:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -1606,17 +1425,6 @@ exports.getTimeTag = function(args) {
 
 var _ = require('underscore')
   , EventEmitter = require('events').EventEmitter
-
-
-// Global settings
-exports.settings = {
-
-  // Current block size
-  blockSize: 16384,
-
-  // Current number of channels
-  channelCount: 2
-}
 
 
 // true if dsp is started, false otherwise 
@@ -1712,7 +1520,7 @@ exports.namedObjects = {
   _store: {}
 }
 
-},{"events":19,"underscore":36}],13:[function(require,module,exports){
+},{"events":22,"underscore":39}],13:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -2886,7 +2694,7 @@ exports.declareObjects = function(library) {
 
 }
 
-},{"./core/Patch":5,"./core/PdObject":6,"./core/mixins":9,"./core/utils":11,"./global":12,"./waa/portlets":18,"underscore":36}],14:[function(require,module,exports){
+},{"./core/Patch":5,"./core/PdObject":6,"./core/mixins":9,"./core/utils":11,"./global":12,"./waa/portlets":21,"underscore":39}],14:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -2911,11 +2719,805 @@ var _ = require('underscore')
 exports.declareObjects = function(library) {
   require('./glue').declareObjects(library)
   require('./controls').declareObjects(library)
-  require('./waa/dsp').declareObjects(library)
-  require('./waa/portlets').declareObjects(library)
+  require('./js-dsp/dsp').declareObjects(library)
+  require('./js-dsp/portlets').declareObjects(library)
   require('./midi').declareObjects(library)
 }
-},{"./controls":2,"./glue":13,"./midi":15,"./waa/dsp":16,"./waa/portlets":18,"underscore":36}],15:[function(require,module,exports){
+},{"./controls":2,"./glue":13,"./js-dsp/dsp":15,"./js-dsp/portlets":18,"./midi":20,"underscore":39}],15:[function(require,module,exports){
+/*
+ * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
+ *
+ *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
+ *
+ *  WebPd is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  WebPd is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+var _ = require('underscore')
+  , utils = require('../core/utils')
+  , PdObject = require('../core/PdObject')
+  , pdGlob = require('../global')
+  , portlets = require('./portlets')
+  , mixins = require('./mixins')
+  , vectors = require('./vectors')
+
+
+var DspObject = exports.DspObject = PdObject.extend(mixins.TickMixin, {
+
+  init: function() {
+    mixins.TickMixin.init.apply(this, arguments)
+  },
+
+  tick: function() {
+    if (this.frame !== pdGlob.audio.frame) {
+      var inlet, i, inletCount = this.inlets.length
+      for (i = 0; i < inletCount; i++) {
+        inlet = this.inlets[i]
+        if (inlet instanceof portlets.DspInlet) 
+          inlet.tick()
+      }
+      this._runTick()
+      this.frame = pdGlob.audio.frame
+    } 
+  }
+
+})
+
+
+var DspEndPoint = DspObject.extend({
+
+  start: function() {
+    DspObject.prototype.start.apply(this)
+    pdGlob.audio.registerEndPoint(this)
+  }
+
+})
+
+
+var VarOrConstantDspInlet = portlets.DspInlet.extend({
+  start: function() {
+    portlets.DspInlet.prototype.start.apply(this, arguments)
+    this.obj._updateRunTick(this.id)
+  },
+  connection: function() {
+    portlets.DspInlet.prototype.connection.apply(this, arguments)
+    this.obj._updateRunTick(this.id)
+  },
+  disconnection: function() {
+    portlets.DspInlet.prototype.disconnection.apply(this, arguments)
+    this.obj._updateRunTick(this.id)
+  }
+})
+
+
+var VarOrConstantDspObject = DspObject.extend({
+
+  _updateRunTick: function(inletId) {
+    if (this.inlets[inletId].dspSources.length)
+      this._runTick = this._runTickVariable
+    else
+      this._runTick = this._runTickConstant
+  }
+
+})
+
+
+var OscDspObject = exports.OscDspObject = VarOrConstantDspObject.extend({
+  // TODO : reset phase takes float and no bang
+  // TODO : recalculate stuff on sample rate change. (Useless ?)
+  inletDefs: [
+    
+    VarOrConstantDspInlet.extend({
+      message: function(args) {
+        this.obj.setFreq(args[0])
+      }
+    }),
+
+    portlets.Inlet.extend({ 
+      message: function(args) {
+        this.obj.setPhase(args[0])
+      }
+    })
+
+  ],
+  outletDefs: [ portlets.DspOutlet ],
+
+  init: function(args) {
+    VarOrConstantDspObject.prototype.init.apply(this, arguments)
+    this.setFreq(args[0] || 0)
+    this.setPhase(0)
+  },
+
+  start: function() {
+    VarOrConstantDspObject.prototype.start.apply(this, arguments)
+    this.J = this._computeJ()
+    this.setFreq(this.freq)
+  },
+
+  setPhase: function(phase) {
+    this.phase = phase
+  },
+
+  // Sets the frequency for the constant frequency _runTick method.
+  setFreq: function(freq) {
+    this.freq = freq
+    this.K = this.freq * this.J
+  },
+
+  // Calculates the cos taking the frequency from dsp inlet
+  _runTickVariable: function() {
+    this.phase = this._opVariable(this.outlets[0].buffer, this.phase, this.J, this.inlets[0].buffer)
+  },
+
+  // Calculates the cos with a constant frequency from first inlet
+  _runTickConstant: function() {
+    this.phase = this._opConstant(this.outlets[0].buffer, this.phase, this.K)
+  }
+
+})
+
+
+var ArithmDspObject = exports.ArithmDspObject = VarOrConstantDspObject.extend({
+  inletDefs: [
+    portlets.DspInlet,
+    VarOrConstantDspInlet.extend({ 
+      message: function(args) {
+        this.obj.setVal(args[0])
+      }
+    })
+  ],
+  outletDefs: [ portlets.DspOutlet ],
+
+  init: function(args) {
+    VarOrConstantDspObject.prototype.init.apply(this, arguments)
+    this.setVal(args[0])
+  },
+
+  setVal: function(val) {
+    this.val = val
+  },
+
+  _runTickVariable: function() {
+    this._opVariable(this.outlets[0].buffer, [ this.inlets[0].buffer, this.inlets[1].buffer ])
+  },
+
+  _runTickConstant: function() {
+    this._opConstant(this.outlets[0].buffer, this.inlets[0].buffer, this.val)
+  }
+})
+
+
+exports.declareObjects = function(library) {
+
+  library['dac~'] = DspEndPoint.extend({
+
+    type: 'dac~',
+    inletDefs: [portlets.DspInlet, portlets.DspInlet],
+
+    _runTick: function() {
+      var ch, channelCount = this.inlets.length
+      for (ch = 0; ch < channelCount; ch++)
+        pdGlob.audio.pushBuffer(ch, this.inlets[ch].buffer)
+    }
+
+  })
+
+  library['osc~'] = OscDspObject.extend({
+    _computeJ: function() { return 2 * Math.PI / pdGlob.audio.sampleRate },
+    _opVariable: vectors.variableCos,
+    _opConstant: vectors.cos
+  })
+
+  library['phasor~'] = OscDspObject.extend({
+    _computeJ: function() { return 1 / pdGlob.audio.sampleRate },
+    _opVariable: vectors.variableSawtooth,
+    _opConstant: vectors.sawtooth
+  })
+
+  library['*~'] = ArithmDspObject.extend({
+    type: '*~',
+    _opVariable: vectors.mult,
+    _opConstant: vectors.multConstant
+  })
+
+  library['+~'] = ArithmDspObject.extend({
+    type: '+~',
+    _opVariable: vectors.add,
+    _opConstant: vectors.addConstant
+  })
+
+  library['-~'] = ArithmDspObject.extend({
+    type: '-~',
+    _opVariable: vectors.sub,
+    _opConstant: vectors.subConstant
+  })
+
+  library['/~'] = ArithmDspObject.extend({
+    type: '/~',
+    _opVariable: vectors.sub,
+    _opConstant: vectors.subConstant
+  })
+
+  library['phasor~'] = null
+  library['triangle~'] = null
+  library['square~'] = null
+  library['noise~'] = null
+  library['line~'] = null
+  library['sig~'] = null
+  library['lop~'] = null
+  library['hip~'] = null
+  library['bp~'] = null
+  library['vcf~'] = null
+  library['tabread~'] = null
+  library['delwrite~'] = null
+  library['delread~'] = null
+  library['clip~'] = null
+  library['adc~'] = null
+}
+},{"../core/PdObject":6,"../core/utils":11,"../global":12,"./mixins":17,"./portlets":18,"./vectors":19,"underscore":39}],16:[function(require,module,exports){
+/*
+ * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
+ *
+ *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
+ *
+ *  WebPd is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  WebPd is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+ 
+var _ = require('underscore')
+  , getUserMedia = require('getusermedia')
+  , pdGlob = require('../global')
+
+
+var Audio = exports.Audio = function(opts) {
+  this.channelCount = 2
+  this.blockSize = opts.blockSize || 4096
+  this.sampleRate = opts.sampleRate
+  if (opts.audioContext)
+    this.setContext(opts.audioContext)
+  this.stream = null
+
+  this.frame = 0
+  Object.defineProperty(this, 'time', {
+    get: function() { return this.frame / this.sampleRate * 1000 },
+  })
+
+  this._endPoints = []
+  this._buffers = []
+  for (ch = 0; ch < this.channelCount; ch++)
+    this._buffers.push(new Float32Array(this.blockSize))
+}
+
+Audio.prototype.start = function() {}
+Audio.prototype.stop = function() {}
+
+Audio.prototype.registerEndPoint = function(endPoint) {
+  this._endPoints.push(endPoint)
+}
+
+Audio.prototype.pushBuffer = function(ch, buffer) {
+  this._buffers[ch] = buffer
+}
+
+Audio.prototype.tick = function() {
+  var blockEnd = this.frame + this.blockSize
+  var endPointsCount = this._endPoints.length
+  var offset = 0
+  var nextFrame, subBlockSize, i
+  while (this.frame !== blockEnd) {
+    nextFrame = pdGlob.clock.tick(blockEnd)
+
+    subBlockSize = nextFrame - this.frame
+    if (subBlockSize) {
+      for (i = 0; i < endPointsCount; i++) {
+        this._endPoints[i].tick(subBlockSize, offset)
+      }
+    }
+    offset += subBlockSize
+    this.frame = nextFrame
+  }
+}
+
+Audio.prototype.setContext = function(context) {
+  var self = this
+    , ch
+  this.context = context
+  this.sampleRate = this.context.sampleRate
+
+  this._scriptProcessor = this.context.createScriptProcessor(this.blockSize, 
+    this.channelCount, this.channelCount)
+
+  this._scriptProcessor.onaudioprocess = function(event) {
+    self.frame += self.blockSize
+    for (ch = 0; ch < self.channelCount; ch++)
+      event.outputBuffer.getChannelData(ch).set(self._buffers[ch])
+    
+    setTimeout(function() {
+      self.tick()
+    }, 0)
+  }
+  this._scriptProcessor.connect(this.context.destination)
+}
+
+Audio.prototype.decode = function(arrayBuffer, done) {
+  this.context.decodeAudioData(arrayBuffer, 
+    function(audioBuffer) {
+      var chArrays = [], ch
+      for (ch = 0; ch < audioBuffer.numberOfChannels; ch++)
+        chArrays.push(audioBuffer.getChannelData(ch))
+      done(null, chArrays)
+    },
+    function(err) {
+      done(new Error('error decoding ' + err))
+    }
+  )
+}
+
+Audio.prototype.getUserMedia = function(done) {
+  var self = this
+  if (this.stream) done(null, this.stream)
+  else {
+    getUserMedia({
+      audio: {
+        mandatory: {
+          googEchoCancellation: false,
+          googAutoGainControl: false,
+          googNoiseSuppression: false,
+          googTypingNoiseDetection: false
+        }
+      }
+    }, function (err, stream) {
+      self.stream = stream
+      done(err, stream)
+    })
+  }
+}
+
+
+// Scheduler to handle timing
+var Clock = exports.Clock = function() {
+  this._events = []
+} 
+
+Clock.prototype.schedule = function(func, time, repetition) {
+  return this._insertEvent({ 
+    func: func, 
+    frame: time * pdGlob.audio.sampleRate / 1000, 
+    repetition: repetition ? repetition * pdGlob.audio.sampleRate / 1000 : null
+  })
+}
+
+Clock.prototype.unschedule = function(event) {
+  this._events = _.without(this._events, event)
+}
+
+Clock.prototype.tick = function(blockEnd) {
+  var frame = pdGlob.audio.frame
+
+  // Remove outdated events
+  while (this._events.length && this._events[0].frame < frame) {
+    this._events.shift()
+    console.error('outdated event discarded')
+  }
+
+  // Execute events that are scheduled for the current frame
+  while (this._events.length && Math.floor(this._events[0].frame) === frame) {
+    var event = this._events[0]
+    event.timeTag = event.frame / pdGlob.audio.sampleRate * 1000
+    event.func(event)
+    if (event.repetition && this._events.indexOf(event) !== -1) {
+      event.frame = event.frame + event.repetition
+      this._insertEvent(event)
+    } else {
+      this._events = _.without(this._events, event)
+    }
+  }
+
+  if (this._events.length)
+    return Math.floor(Math.min(this._events[0].frame, blockEnd))
+  else
+    return blockEnd
+}
+
+Clock.prototype._insertEvent = function(event) {
+  var ind = _.sortedIndex(this._events, event, 'frame')
+  this._events.splice(ind, 0, event)
+  return event
+}
+
+
+var Midi = exports.Midi = function() {
+  this._midiInput = null
+  this._callback = function() {}
+}
+
+Midi.prototype.onMessage = function(callback) {
+  this._callback = callback
+}
+
+Midi.prototype.getMidiInput = function() {
+  return this._midiInput
+}
+
+// Associate a MIDIInput object per the Web MIDI spec
+// See <https://www.w3.org/TR/webmidi/#midiinput-interface>
+// Set to `null` to deactivate midi input
+Midi.prototype.setMidiInput = function(midiInput) {
+  if (midiInput === this._midiInput)
+    return
+  if (this._midiInput)
+    this._midiInput.removeEventListener('midimessage', this._callback)
+  this._midiInput = midiInput
+  if (this._midiInput)
+    this._midiInput.addEventListener('midimessage', this._callback)
+}
+
+
+var WebStorage = exports.Storage = function() {}
+
+// Gets an array buffer through an ajax request, then calls `done(err, arrayBuffer)`
+WebStorage.prototype.get = function(url, done) {
+  var req = new XMLHttpRequest()
+
+  req.onload = function(e) {
+    if (this.status === 200)
+      done(null, this.response)
+    else done(new Error('HTTP ' + this.status + ': ' + this.statusText))
+  }
+
+  req.onerror = function(e) {
+    done(e)
+  }
+
+  req.open('GET', url, true)
+  req.responseType = 'arraybuffer'
+  req.send()
+}
+},{"../global":12,"getusermedia":27,"underscore":39}],17:[function(require,module,exports){
+/*
+ * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
+ *
+ *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
+ *
+ *  WebPd is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  WebPd is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+var pdGlob = require('../global')
+
+exports.TickMixin = {
+
+  init: function() {
+    this.frame = -1
+  },
+
+  tick: function() {
+    if (this.frame !== pdGlob.audio.frame) {
+      this._runTick()
+      this.frame = pdGlob.audio.frame
+    }
+  },
+
+  _runTick: function() {
+    throw new Error('not implemented')
+  }
+
+}
+},{"../global":12}],18:[function(require,module,exports){
+/*
+ * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
+ *
+ *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
+ *
+ *  WebPd is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  WebPd is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+var _ = require('underscore')
+  , utils = require('../core/utils')
+  , corePortlets = require('../core/portlets')
+  , PdObject = require('../core/PdObject')
+  , pdGlob = require('../global')
+  , mixins = require('./mixins')
+  , vectors = require('./vectors')
+
+
+var DspInlet = exports.DspInlet = corePortlets.Inlet.extend(mixins.TickMixin, {
+
+  init: function() {
+    mixins.TickMixin.init.apply(this, arguments)
+    this.dspSources = []
+  },
+
+  start: function() {
+    this._updateTickMethod()
+  },
+
+  connection: function() {
+    this._updateTickMethod()
+  },
+
+  disconnection: function() {
+    this._updateTickMethod()
+  },
+
+  // In case only one source, we reference directly its output buffer to avoid 
+  // copies / allocations as much as possible
+  _tickOneSource: function() {
+    this.dspSources[0].obj.tick()
+    this.buffer = this.dspSources[0].buffer
+  },
+
+  // In case several sources, we have to compute their sum
+  _tickSeveralSources: function() {
+    var sourceCount = this.dspSources.length
+    for (i = 0; i < sourceCount; i++) 
+      this.dspSources[i].obj.tick() 
+    vectors.add(this.buffer, _.pluck(this.dspSources, 'buffer'))
+  },
+
+  _tickNoSource: function() {},
+
+  _updateTickMethod: function() {
+    this.dspSources = this.connections.filter(function(source) { return source instanceof DspOutlet })
+    
+    // If several sources, we need to allocate a new buffer for computing the sum. 
+    if (this.dspSources.length > 1) {
+      this.buffer = new Float32Array(pdGlob.audio.blockSize)
+      this._runTick = this._tickSeveralSources
+    } else if (this.dspSources.length === 1)
+      this._runTick = this._tickOneSource
+    else if (this.dspSources.length === 0) {
+      this.buffer = new Float32Array(pdGlob.audio.blockSize)
+      this._runTick = this._tickNoSource
+    }
+  }
+
+})
+
+
+var DspOutlet = exports.DspOutlet = corePortlets.Outlet.extend({
+
+  start: function() {
+    this.buffer = new Float32Array(pdGlob.audio.blockSize)
+  }
+})
+
+exports.Inlet = corePortlets.Inlet
+
+exports.Outlet = corePortlets.Outlet
+
+exports.declareObjects = function(library) {
+  library['outlet'] = function() {}
+  library['outlet~'] = function() {}
+  library['inlet'] = function() {}
+  library['inlet~'] = function() {}
+}
+},{"../core/PdObject":6,"../core/portlets":10,"../core/utils":11,"../global":12,"./mixins":17,"./vectors":19,"underscore":39}],19:[function(require,module,exports){
+/*
+ * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
+ *
+ *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
+ *
+ *  WebPd is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  WebPd is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+exports.add = function(destination, sources) {
+  var source, i, j
+  var length = destination.length
+  var sourceCount = sources.length
+
+  source = sources[0]
+  for (j = 0; j < length; j++)
+    destination[j] = source[j]
+
+  for (i = 1; i < sourceCount; i++) {
+    source = sources[i]
+    for (j = 0; j < length; j++)
+      destination[j] += source[j]
+  }
+}
+
+exports.addConstant = function(destination, source, constant) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++)
+    destination[i] = source[i] + constant
+}
+
+exports.mult = function(destination, sources) {
+  var source, i, j
+  var length = destination.length
+  var sourceCount = sources.length
+
+  source = sources[0]
+  for (j = 0; j < length; j++)
+    destination[j] = source[j]
+
+  for (i = 1; i < sourceCount; i++) {
+    source = sources[i]
+    for (j = 0; j < length; j++)
+      destination[j] *= source[j]
+  }
+}
+
+exports.multConstant = function(destination, source, constant) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++)
+    destination[i] = source[i] * constant
+}
+
+exports.div = function(destination, sources) {
+  var source, i, j
+  var length = destination.length
+  var sourceCount = sources.length
+
+  source = sources[0]
+  for (j = 0; j < length; j++)
+    destination[j] = source[j]
+
+  for (i = 1; i < sourceCount; i++) {
+    source = sources[i]
+    for (j = 0; j < length; j++)
+      destination[j] /= source[j]
+  }
+}
+
+exports.divConstant = function(destination, source, constant) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++)
+    destination[i] = source[i] / constant
+}
+
+exports.sub = function(destination, sources) {
+  var source, i, j
+  var length = destination.length
+  var sourceCount = sources.length
+
+  source = sources[0]
+  for (j = 0; j < length; j++)
+    destination[j] = source[j]
+
+  for (i = 1; i < sourceCount; i++) {
+    source = sources[i]
+    for (j = 0; j < length; j++)
+      destination[j] -= source[j]
+  }
+}
+
+exports.subConstant = function(destination, source, constant) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++)
+    destination[i] = source[i] - constant
+}
+
+exports.mod = function(destination, sources) {
+  var source, i, j
+  var length = destination.length
+  var sourceCount = sources.length
+
+  source = sources[0]
+  for (j = 0; j < length; j++)
+    destination[j] = source[j]
+
+  for (i = 1; i < sourceCount; i++) {
+    source = sources[i]
+    for (j = 0; j < length; j++)
+      destination[j] %= source[j]
+  }
+}
+
+exports.modConstant = function(destination, source, constant) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++)
+    destination[i] = source[i] % constant
+}
+
+// K = freq * 2 * Math.PI  / sampleRate = freq * J
+exports.cos = function(destination, phase, K) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++) {
+    phase += K
+    destination[i] = Math.cos(phase)
+  }
+  return phase
+}
+
+// J = 2 * Math.PI / sampleRate
+exports.variableCos = function(destination, phase, J, frequencies) {
+  var i
+  var length = destination.length
+  for (i = 0, length = destination.length; i < length; i++) {
+    phase += J * frequencies[i]
+    destination[i] = Math.cos(phase)
+  }
+  return phase
+}
+
+// K = freq * 1 / sampleRate = freq * J
+exports.sawtooth = function(destination, phase, K) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++) {
+    phase = (phase + K) % 1
+    destination[i] = phase
+  }
+  return phase
+}
+
+// J = 1 / sampleRate
+exports.variableSawtooth = function(destination, phase, J, frequencies) {
+  var i
+  var length = destination.length
+  for (i = 0, length = destination.length; i < length; i++) {
+    phase = (phase + J * frequencies[i]) % 1
+    destination[i] = phase
+  }
+  return phase
+}
+
+},{}],20:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>, Jacob Stern <jacob.stern@outlook.com>
  *
@@ -3120,1213 +3722,7 @@ exports.declareObjects = function(library) {
     }
   })
 }
-},{"./core/PdObject":6,"./core/mixins":9,"./core/utils":11,"./global":12,"./waa/portlets":18,"underscore":36}],16:[function(require,module,exports){
-/*
- * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
- *
- *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
- *
- *  WebPd is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  WebPd is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
-var _ = require('underscore')
-  , WAAOffset = require('waaoffsetnode')
-  , WAAWhiteNoise = require('waawhitenoisenode')
-  , WAATableNode = require('waatablenode')
-  , utils = require('../core/utils')
-  , mixins = require('../core/mixins')
-  , PdObject = require('../core/PdObject')
-  , portlets = require('./portlets')
-  , pdGlob = require('../global')
-
-exports.declareObjects = function(library) {
-
-  var _OscBase = PdObject.extend({
-
-    inletDefs: [
-
-      portlets.DspInlet.extend({
-        message: function(args) {
-          var frequency = args[0]
-          if (!this.hasDspSource()) {
-            if (!_.isNumber(frequency))
-              return console.error('invalid [' + this.obj.type + '] frequency ' + frequency)
-            if (frequency === Infinity) frequency = 0
-            this.obj.frequency = frequency
-            this.obj._updateFrequency(utils.getTimeTag(args))
-          }
-        }
-      }),
-
-      portlets.Inlet.extend({
-        message: function(args) {
-          var phase = args[0]
-          if (!_.isNumber(phase))
-            return console.error('invalid [' + this.obj.type + '] phase ' + phase)
-          this.obj._updatePhase(phase, utils.getTimeTag(args))
-        }
-      })
-
-    ],
-
-    outletDefs: [portlets.DspOutlet],
-
-    init: function(args) {
-      this.frequency = args[0] || 0
-    },
-
-    start: function() {
-      this._createOscillator(0, 0)
-    },
-
-    stop: function() {
-      this._destroyOscillator()
-    },
-
-    _updateFrequency: function(timeTag) {
-      if (this._oscNode)
-        this._oscNode.frequency.setValueAtTime(this.frequency, timeTag / 1000)
-    },
-
-    _updatePhase: function(phase, timeTag) {
-      if (pdGlob.isStarted)
-        this._createOscillator(phase, timeTag)
-    }
-
-  })
-
-
-  // TODO : When phase is set, the current oscillator will be immediately disconnected,
-  // while ideally, it should be disconnected only at `timeTag` 
-  library['osc~'] = _OscBase.extend({
-
-    type: 'osc~',
-
-    _createOscillator: function(phase, timeTag) {
-      phase = phase * 2 * Math.PI 
-      this._oscNode = pdGlob.audio.context.createOscillator()
-      this._oscNode.setPeriodicWave(pdGlob.audio.context.createPeriodicWave(
-        new Float32Array([0, Math.cos(phase)]),
-        new Float32Array([0, Math.sin(-phase)])
-      ))
-      this._oscNode.start(timeTag / 1000)
-      this.o(0).setWaa(this._oscNode, 0)
-      this.i(0).setWaa(this._oscNode.frequency, 0)
-      this.i(0).message([this.frequency])
-    },
-
-    _destroyOscillator: function() {
-      this._oscNode.stop(0)
-      this._oscNode = null
-    }
-
-  })
-
-
-  library['phasor~'] = _OscBase.extend({
-
-    type: 'phasor~',
-
-    _createOscillator: function(phase, timeTag) {
-      this._gainNode = pdGlob.audio.context.createGain()
-      this._gainNode.gain.value = 0.5
-
-      this._oscNode = pdGlob.audio.context.createOscillator()
-      this._oscNode.type = 'sawtooth'
-      this._oscNode.start(timeTag / 1000)
-      this._oscNode.connect(this._gainNode)
-      
-      this._offsetNode = new WAAOffset(pdGlob.audio.context)
-      this._offsetNode.offset.value = 1
-      this._offsetNode.connect(this._gainNode)
-
-      this.o(0).setWaa(this._gainNode, 0)
-      this.i(0).setWaa(this._oscNode.frequency, 0)
-      this.i(0).message([this.frequency])
-    },
-
-    _destroyOscillator: function() {
-      this._oscNode.stop(0)
-      this._oscNode = null
-      this._gainNode = null
-      this._offsetNode = null
-    }
-
-  })
-
-
-  library['triangle~'] = _OscBase.extend({
-
-    type: 'triangle~',
-
-    _createOscillator: function(phase, timeTag) {
-      this._oscNode = pdGlob.audio.context.createOscillator()
-      this._oscNode.type = 'triangle'
-      this._oscNode.start(timeTag / 1000)
-      this.o(0).setWaa(this._oscNode, 0)
-      this.i(0).setWaa(this._oscNode.frequency, 0)
-      this.i(0).message([this.frequency])
-    },
-
-    _destroyOscillator: function() {
-      this._oscNode.stop(0)
-      this._oscNode = null
-    }
-
-  })
-
-
-  library['square~'] = _OscBase.extend({
-
-    type: 'square~',
-
-    _createOscillator: function(phase, timeTag) {
-      this._oscNode = pdGlob.audio.context.createOscillator()
-      this._oscNode.type = 'square'
-      this._oscNode.start(timeTag / 1000)
-      this.o(0).setWaa(this._oscNode, 0)
-      this.i(0).setWaa(this._oscNode.frequency, 0)
-      this.i(0).message([this.frequency])
-    },
-
-    _destroyOscillator: function() {
-      this._oscNode.stop(0)
-      this._oscNode = null
-    }
-
-  })
-
-
-  // NB : This should work, but for now it doesn't seem to.
-  // issues filed for chrome here : https://code.google.com/p/chromium/issues/detail?id=471675
-  // and firefox here : https://bugzilla.mozilla.org/show_bug.cgi?id=1149053
-
-  // Another possible technique would be to use 2 WaveShaperNodes one with the sign function, 
-  // The other with acos.
-
-  // TODO : When phase is set, the current oscillator will be immediately disconnected,
-  // while ideally, it should be disconnected only at `futureTime`
-  // TODO: phase
-  /*library['phasor~'] = _OscBase.extend({
-
-    type: 'phasor~',
-
-    start: function() {
-      this._createOscillator(0)
-    },
-
-    stop: function() {
-      this._bufferSource.stop(0)
-      this._bufferSource = null
-    },
-
-    _createOscillator: function(phase) {
-      var sampleRate = pdGlob.audio.context.sampleRate
-        , buffer = pdGlob.audio.context.createBuffer(1, sampleRate, sampleRate)
-        , array = buffer.getChannelData(0)
-        , acc = phase, step = 1 / sampleRate, i
-
-      for (i = 0; i < sampleRate; i++) {
-        array[i] = (acc % 1)
-        acc += step
-      }
-
-      this._bufferSource = pdGlob.audio.context.createBufferSource()
-      this._bufferSource.buffer = buffer
-      this._bufferSource.loop = true
-      this._bufferSource.start(pdGlob.futureTime / 1000 || 0)
-      
-      this.o(0).setWaa(this._bufferSource, 0)
-      this.i(0).setWaa(this._bufferSource.playbackRate, 0)
-      this.i(0).message([this.frequency])
-    },
-
-    _updateFrequency: function() {
-      if (this._bufferSource)
-        this._bufferSource.playbackRate.setValueAtTime(this.frequency, pdGlob.futureTime / 1000 || 0)
-    },
-
-    _updatePhase: function(phase) {
-      if (pdGlob.isStarted)
-        this._createOscillator(phase)
-    }
-
-  })*/
-
-
-  library['noise~'] = PdObject.extend({
-
-    type: 'noise~',
-
-    outletDefs: [portlets.DspOutlet],
-
-    start: function() {
-      this._noiseNode = new WAAWhiteNoise(pdGlob.audio.context)
-      this._noiseNode.start(0)
-      this.o(0).setWaa(this._noiseNode, 0)
-    },
-
-    stop: function() {
-      this._noiseNode.stop(0)
-      this._noiseNode.disconnect()
-      this._noiseNode = null
-    }
-
-  })
-
-  // TODO : doesn't work when interrupting a line (probably)
-  library['line~'] = PdObject.extend({
-
-    type: 'line~',
-
-    inletDefs: [
-
-      portlets.Inlet.extend({
-
-        init: function() {
-          this._queue = []
-          this._lastValue = 0
-        },
-
-        message: function(args) {
-          var self = this
-          if (this.obj._offsetNode) {
-            var v2 = args[0]
-              , t1 = utils.getTimeTag(args)
-              , duration = args[1] || 0
-
-            // Deal with arguments
-            if (!_.isNumber(v2))
-              return console.error('invalid [line~] value ' + v2)
-            if (duration) {
-              if (!_.isNumber(duration))
-                return console.error('invalid [line~] duration ' + duration)
-            }
-
-            // Refresh the queue to current time and push the new line
-            this._refreshQueue(pdGlob.audio.time)
-            var newLines = this._pushToQueue(t1, v2, duration)
-
-            // Cancel everything that was after the new lines, and schedule them
-            this.obj._offsetNode.offset.cancelScheduledValues(newLines[0].t1 / 1000 + 0.000001)
-            newLines.forEach(function(line) {
-              if (line.t1 !== line.t2)
-                self.obj._offsetNode.offset.linearRampToValueAtTime(line.v2, line.t2 / 1000)
-              else
-                self.obj._offsetNode.offset.setValueAtTime(line.v2, line.t2 / 1000)
-            })
-          }
-        },
-
-        _interpolate: function(line, time) {
-          return (time - line.t1) * (line.v2 - line.v1) / (line.t2 - line.t1) + line.v1
-        },
-
-        // Refresh the queue to `time`, removing old lines and setting `_lastValue`
-        // if appropriate.
-        _refreshQueue: function(time) {
-          if (this._queue.length === 0) return
-          var i = 0, line, oldLines
-          while ((line = this._queue[i++]) && time >= line.t2) 1
-          oldLines = this._queue.slice(0, i - 1)
-          this._queue = this._queue.slice(i - 1)
-          if (this._queue.length === 0)
-            this._lastValue = oldLines[oldLines.length - 1].v2
-        },
-
-        // push a line to the queue, overriding the lines that were after it,
-        // and creating new lines if interrupting something in its middle.
-        _pushToQueue: function(t1, v2, duration) {
-          var i = 0, line, newLines = []
-          
-          // Find the point in the queue where we should insert the new line.
-          while ((line = this._queue[i++]) && (t1 >= line.t2)) 1
-          this._queue = this._queue.slice(0)
-
-          if (this._queue.length) {
-            var lastLine = this._queue[this._queue.length - 1]
-
-            // If the new line interrupts the last in the queue, we have to interpolate
-            // a new line
-            if (t1 < lastLine.t2) {
-              this._queue = this._queue.slice(0, -1)
-              line = {
-                t1: lastLine.t1, v1: lastLine.v1,
-                t2: t1, v2: this._interpolate(lastLine, t1)
-              }
-              newLines.push(line)
-              this._queue.push(line)
-
-            // Otherwise, we have to fill-in the gap with a straight line
-            } else if (t1 > lastLine.t2) {
-              line = {
-                t1: lastLine.t2, v1: lastLine.v2,
-                t2: t1, v2: lastLine.v2
-              }
-              newLines.push(line)
-              this._queue.push(line)
-            }
-
-          // If there isn't any value in the queue yet, we fill in the gap with
-          // a straight line from `_lastValue` all the way to `t1` 
-          } else {
-            line = {
-              t1: 0, v1: this._lastValue,
-              t2: t1, v2: this._lastValue
-            }
-            newLines.push(line)
-            this._queue.push(line)
-          }
-
-          // Finally create the line and add it to the queue
-          line = {
-            t1: t1, v1: this._queue[this._queue.length - 1].v2,
-            t2: t1 + duration, v2: v2
-          }
-          newLines.push(line)
-          this._queue.push(line)
-          return newLines
-        }
-
-      })
-
-    ],
-
-    outletDefs: [portlets.DspOutlet],
-
-    start: function() {
-      this._offsetNode = new WAAOffset(pdGlob.audio.context)
-      this._offsetNode.offset.setValueAtTime(0, 0)
-      this.o(0).setWaa(this._offsetNode, 0)
-    },
-
-    stop: function() {
-      this._offsetNode = null
-    }
-
-  })
-
-
-  library['sig~'] = PdObject.extend({
-
-    type: 'sig~',
-
-    inletDefs: [
-
-      portlets.Inlet.extend({
-        message: function(args) {
-          var value = args[0]
-          if (!_.isNumber(value))
-            return console.error('invalid [sig~] value ' + value)
-          this.obj.value = value
-          if (this.obj._offsetNode)
-            this.obj._offsetNode.offset.setValueAtTime(value, utils.getTimeTag(args) / 1000)
-        }
-      })
-
-    ],
-
-    outletDefs: [portlets.DspOutlet],
-
-    init: function(args) {
-      this.value = args[0] || 0
-    },
-
-    start: function() {
-      this._offsetNode = new WAAOffset(pdGlob.audio.context)
-      this._offsetNode.offset.setValueAtTime(0, 0)
-      this.o(0).setWaa(this._offsetNode, 0)
-      this.i(0).message([this.value])
-    },
-
-    stop: function() {
-      this._offsetNode = null
-    }
-
-  })
-
-
-  var _FilterFrequencyInletMixin = {
-    message: function(args) {
-      var frequency = args[0]
-      if (!_.isNumber(frequency))
-        return console.error('invalid [' + this.obj.type + '] frequency ' + frequency)
-      this.obj.frequency = frequency
-      if (this.obj._filterNode)
-        this.obj._filterNode.frequency.setValueAtTime(frequency, utils.getTimeTag(args) / 1000)
-    }
-  }
-
-  var _FilterQInletMixin = {
-    message: function(args) {
-      var Q = args[0]
-      if (!_.isNumber(Q))
-        return console.error('invalid [' + this.obj.type + '] Q ' + Q)
-      this.obj.Q = Q
-      if (this.obj._filterNode)
-        this.obj._filterNode.Q.setValueAtTime(Q, utils.getTimeTag(args) / 1000)
-    }
-  }
-
-  var _BaseFilter = PdObject.extend({
-
-    inletDefs: [portlets.DspInlet, portlets.Inlet.extend(_FilterFrequencyInletMixin)],
-    outletDefs: [portlets.DspOutlet],
-
-    init: function(args) {
-      this.frequency = args[0] || 0
-    },
-
-    start: function() {
-      this._filterNode = pdGlob.audio.context.createBiquadFilter()
-      this._filterNode.frequency.setValueAtTime(this.frequency, 0)
-      this._filterNode.type = this.waaFilterType
-      this.i(0).setWaa(this._filterNode, 0)
-      this.o(0).setWaa(this._filterNode, 0)
-      this.i(1).message([this.frequency])
-    },
-
-    stop: function() {
-      this._filterNode = null
-    }
-
-  })
-
-  var _BaseBandFilter = _BaseFilter.extend({
-    waaFilterType: 'bandpass',
-
-    init: function(args) {
-      _BaseFilter.prototype.init.call(this, args)
-      this.Q = args[1] || 1
-    },
-
-    start: function(args) {
-      _BaseFilter.prototype.start.call(this, args)
-      this._filterNode.Q.setValueAtTime(this.Q, 0)
-      this.i(2).message([this.Q])
-    }
-
-  })
-
-
-  // TODO: tests for filters
-  library['lop~'] = _BaseFilter.extend({
-    type: 'lop~',
-    waaFilterType: 'lowpass'
-  })
-
-
-  library['hip~'] = _BaseFilter.extend({
-    type: 'hip~',
-    waaFilterType: 'highpass'
-  })
-
-
-  library['bp~'] = _BaseBandFilter.extend({
-    type: 'bp~',
-
-    inletDefs: [
-      portlets.DspInlet,
-      portlets.Inlet.extend(_FilterFrequencyInletMixin),
-      portlets.Inlet.extend(_FilterQInletMixin)
-    ]
-  })
-
-
-  library['vcf~'] = _BaseBandFilter.extend({
-    type: 'vcf~',
-
-    inletDefs: [
-      portlets.DspInlet,
-      portlets.DspInlet.extend(_FilterFrequencyInletMixin),
-      portlets.Inlet.extend(_FilterQInletMixin)
-    ],
-    outletDefs: [portlets.DspOutlet, portlets.UnimplementedOutlet],
-
-    start: function(args) {
-      _BaseBandFilter.prototype.start.call(this, args)
-      this.i(1).setWaa(this._filterNode.frequency, 0)
-    }
-
-  })
-
-
-  var _DspArithmBase = PdObject.extend({
-
-    outletDefs: [portlets.DspOutlet],
-
-    init: function(args) {
-      var val = args[0]
-      this.setVal(val || 0)
-    },
-
-    setVal: function(val) {
-      if (!_.isNumber(val))
-        return console.error('invalid [' + this.obj.type + '] value ' + val)
-      this.val = val
-    }
-
-  })
-
-  // Mixin for inlet 1 of Dsp arithmetics objects *~, +~, ...
-  var _DspArithmValInletMixin = {
-    
-    message: function(args) {
-      var val = args[0]
-      this.obj.setVal(val)
-      if (!this.hasDspSource()) this._setValNoDsp(val, utils.getTimeTag(args))
-    },
-    
-    disconnection: function(outlet) {
-      portlets.DspInlet.prototype.disconnection.apply(this, arguments) 
-      if (outlet instanceof portlets.DspOutlet && !this.hasDspSource())
-        this._setValNoDsp(this.obj.val, 0)
-    }
-  }
-
-
-  library['*~'] = _DspArithmBase.extend({
-    type: '*~',
-
-    inletDefs: [
-
-      portlets.DspInlet,
-
-      portlets.DspInlet.extend(_DspArithmValInletMixin, {
-        _setValNoDsp: function(val, timeTag) {
-          if (this.obj._gainNode)
-            this.obj._gainNode.gain.setValueAtTime(val, timeTag / 1000)
-        }
-      })
-
-    ],
-
-    start: function() {
-      this._gainNode = pdGlob.audio.context.createGain()
-      this.i(0).setWaa(this._gainNode, 0)
-      this.i(1).setWaa(this._gainNode.gain, 0)
-      this.o(0).setWaa(this._gainNode, 0)
-      if (!this.i(1).hasDspSource()) this.i(1)._setValNoDsp(this.val, 0)
-    },
-
-    stop: function() {
-      this._gainNode = null
-    }
-
-  })
-
-
-  library['+~'] = _DspArithmBase.extend({
-    type: '+~',
-
-    inletDefs: [
-
-      portlets.DspInlet,
-
-      portlets.DspInlet.extend(_DspArithmValInletMixin, {
-        _setValNoDsp: function(val, timeTag) { 
-          if (this.obj._offsetNode)
-            this.obj._offsetNode.offset.setValueAtTime(val, timeTag / 1000)
-        }
-      })
-
-    ],
-
-    start: function() {
-      this._offsetNode = new WAAOffset(pdGlob.audio.context)
-      this._gainNode = pdGlob.audio.context.createGain()
-      this._gainNode.gain.value = 1
-      this._offsetNode.offset.value = 0
-      this._offsetNode.connect(this._gainNode, 0, 0)
-      this.i(0).setWaa(this._gainNode, 0)
-      this.i(1).setWaa(this._offsetNode.offset, 0)
-      this.o(0).setWaa(this._gainNode, 0)
-      if (!this.i(1).hasDspSource()) this.i(1)._setValNoDsp(this.val, 0)
-    },
-
-    stop: function() {
-      this._offsetNode.disconnect()
-      this._gainNode = null
-      this._offsetNode = null
-    }
-
-  })
-
-
-  library['-~'] = _DspArithmBase.extend({
-    type: '-~',
-
-    inletDefs: [
-
-      portlets.DspInlet,
-
-      portlets.DspInlet.extend(_DspArithmValInletMixin, {
-        _setValNoDsp: function(val, timeTag) { 
-          if (this.obj._offsetNode)
-            this.obj._offsetNode.offset.setValueAtTime(val, timeTag / 1000)
-        }
-      })
-
-    ],
-
-    start: function() {
-      this._offsetNode = new WAAOffset(pdGlob.audio.context)
-      this._gainNode = pdGlob.audio.context.createGain()
-      this._negateGainNode = pdGlob.audio.context.createGain()
-      this._gainNode.gain.value = 1
-      this._negateGainNode.gain.value = -1
-      this._offsetNode.offset.value = 0
-      this._offsetNode.connect(this._negateGainNode, 0, 0)
-      this._negateGainNode.connect(this._gainNode, 0, 0)
-      this.i(0).setWaa(this._gainNode, 0)
-      this.i(1).setWaa(this._offsetNode.offset, 0)
-      this.o(0).setWaa(this._gainNode, 0)
-      if (!this.i(1).hasDspSource()) this.i(1)._setValNoDsp(this.val, 0)
-    },
-
-    stop: function() {
-      this._negateGainNode.disconnect()
-      this._offsetNode.disconnect()
-      this._gainNode = null
-      this._negateGainNode = null
-      this._offsetNode = null
-    }
-
-  })
-
-  // Baseclass for tabwrite~, tabread~ and others ...
-  var _TabBase = PdObject.extend({
-
-    init: function(args) {
-      var self = this
-      this.array = new mixins.Reference('array')
-      this._onDataChangedHandler = null
-      this._eventReceiver = new mixins.EventReceiver()
-
-      // When name of the referenced array is changing, we need to detach handlers
-      this._eventReceiver.on(this.array, 'changed', function(newArray, oldArray) {
-        if (oldArray) oldArray.removeListener('changed:data', self._onDataChangedHandler)
-        if (newArray) {
-          self._onDataChangedHandler = function() { self.dataChanged() }
-          self._eventReceiver.on(newArray, 'changed:data', self._onDataChangedHandler)
-        }
-      })
-    },
-
-    dataChanged: function() {},
-
-    destroy: function() {
-      this._eventReceiver.destroy()
-      this.array.destroy()
-    }
-
-  })
-
-  // TODO: tabread4~
-  // TODO: when array's data changes, this should update the node
-  library['tabread~'] = library['tabread4~'] = _TabBase.extend({
-    type: 'tabread~',
-
-    inletDefs: [
-      portlets.DspInlet.extend({
-        
-        message: function(args) {
-          var method = args[0]
-          if (method === 'set')
-            this.obj.array.set(args[1])
-          else
-            console.error('unknown method ' + method)
-        },
-
-        connection: function() {
-          portlets.DspInlet.prototype.connection.apply(this, arguments)
-          this.obj._updateDsp()
-        },
-
-        disconnection: function() {
-          portlets.DspInlet.prototype.disconnection.apply(this, arguments)
-          this.obj._updateDsp()
-        }
-
-      })
-    ],
-
-    outletDefs: [portlets.DspOutlet],
-
-    init: function(args) {
-      var self = this
-        , arrayName = args[0]
-      _TabBase.prototype.init.apply(this, arguments)
-      this._eventReceiver.on(this.array, 'changed', function() { self._updateDsp() })
-      if (arrayName) this.array.set(arrayName)
-    },
-
-    start: function() {
-      this._tableNode = new WAATableNode(pdGlob.audio.context)
-      this._gainNode = pdGlob.audio.context.createGain()
-      this.i(0).setWaa(this._tableNode.position, 0)
-      this.o(0).setWaa(this._gainNode, 0)
-      this._updateDsp()
-    },
-
-    stop: function() {
-      this._tableNode = null
-      this._gainNode = null
-    },
-
-    dataChanged: function() {
-      if (this._tableNode) this._tableNode.table = this.array.resolved.data
-    },
-
-    _updateDsp: function() {
-      if (this._tableNode && this.array.resolved && this.i(0).hasDspSource()) {
-        this._tableNode.table = this.array.resolved.data
-        this._tableNode.connect(this._gainNode)
-      } else if (this._tableNode) {
-        this._tableNode.disconnect()
-      }
-    }
-
-  })
-
-  library['delwrite~'] = PdObject.extend(mixins.NamedMixin, mixins.EventEmitterMixin, {
-
-    type: 'delwrite~',
-
-    inletDefs: [portlets.DspInlet],
-
-    init: function(args) {
-      var name = args[0]
-        , maxDelayTime = args[1]
-      this.maxDelayTime = maxDelayTime || 1000
-      if (name) this.setName(name)
-    },
-
-    start: function() {
-      this._pipeNode = pdGlob.audio.context.createGain()
-      this.i(0).setWaa(this._pipeNode, 0)
-      this.emit('started')
-    },
-
-    stop: function() {
-      this._pipeNode.disconnect()
-      this._pipeNode = null
-    },
-
-    destroy: function() {
-      mixins.NamedMixin.destroy.apply(this, arguments)
-      mixins.EventEmitterMixin.destroy.apply(this, arguments)
-    }
-
-  })
-
-  library['delread~'] = library['vd~'] = PdObject.extend({
-
-    type: 'delread~',
-
-    inletDefs: [
-      portlets.DspInlet.extend({
-        message: function(args) {
-          var delayTime = args[0]
-          this.obj.setDelayTime(delayTime, utils.getTimeTag(args))
-        }
-      })
-    ],
-    outletDefs: [portlets.DspOutlet],
-
-    init: function(args) {
-      var self = this
-        , delayName = args[0]
-        , initialDelayTime = args[1]
-      this._eventReceiver = new mixins.EventReceiver()
-      this._delayTime = initialDelayTime || 0
-      this._delWrite = new mixins.Reference('delwrite~')
-      this._onDelWriteStarted = null
-      if (delayName) this._delWrite.set(delayName)
-    },
-
-    start: function() {
-      this._createDelay()
-      this._onDelWriteChanged = function(newObj, oldObj) {
-        if (pdGlob.isStarted && newObj) self._createDelay()
-      }
-      this._eventReceiver.on(this._delWrite, 'changed', this._onDelWriteChanged)
-    },
-
-    stop: function() {
-      this._toSecondsGain = null
-      this._delayNode.disconnect()
-      this._delayNode = null
-      this._delWrite.removeListener('changed', this._onDelWriteChanged)
-      this._onDelWriteChanged = null
-    },
-
-    destroy: function() {
-      this._delWrite.destroy()
-      this._eventReceiver.destroy()
-    },
-
-    setDelayTime: function(delayTime, timeTag) {
-      if (!_.isNumber(delayTime))
-        return console.error('invalid [delread~] length ' + delayTime)
-      this._delayTime = delayTime
-      if (this._delayNode && !this.i(0).hasDspSource())
-        this._delayNode.delayTime.setValueAtTime(this._delayTime / 1000, timeTag / 1000 || 0)
-    },
-
-    _createDelay: function() {
-      if (this._delayNode) this._delayNode.disconnect()
-      var maxDelayTime = this._delWrite.resolved ? this._delWrite.resolved.maxDelayTime / 1000 : 1
-        , self = this
-      this._delayNode = pdGlob.audio.context.createDelay(maxDelayTime)
-
-      if (!this._toSecondsGain) {
-        this._toSecondsGain = pdGlob.audio.context.createGain()
-        this._toSecondsGain.gain.value = 0.001
-        this.i(0).setWaa(this._toSecondsGain, 0)
-      }
-
-      this._toSecondsGain.connect(this._delayNode.delayTime)
-      this.o(0).setWaa(this._delayNode, 0)
-      this.setDelayTime(this._delayTime)
-      if (this._delWrite.resolved) {
-        var doConnection = function() { self._delWrite.resolved._pipeNode.connect(self._delayNode) }
-        if (this._delWrite.resolved._pipeNode)
-          doConnection()
-        else {
-          this._onDelWriteStarted = doConnection
-          this._eventReceiver.once(this._delWrite.resolved, 'started', this._onDelWriteStarted)
-        }
-      }
-        
-    }
-
-  })
-
-
-  // TODO : should change curve in the future
-  library['clip~'] = PdObject.extend({
-
-    type: 'clip~',
-
-    inletDefs: [
-
-      portlets.DspInlet,
-
-      portlets.Inlet.extend({
-        message: function(args) {
-          var minValue = args[0]
-          if (!_.isNumber(minValue))
-            return console.error('invalid [clip~] min ' + minValue)
-          this.obj.minValue = minValue
-          this.obj._updateGains()
-        }
-      }),
-
-      portlets.Inlet.extend({
-        message: function(args) {
-          var maxValue = args[0]
-          if (!_.isNumber(maxValue))
-            return console.error('invalid [clip~] max ' + maxValue)
-          this.obj.maxValue = maxValue
-          this.obj._updateGains()
-        }
-      })
-
-    ],
-
-    outletDefs: [portlets.DspOutlet],
-
-    init: function(args) {
-      this.minValue = args[0] || 0
-      this.maxValue = args[1] || 0
-    },
-
-    start: function() {
-      this._gainInNode = pdGlob.audio.context.createGain()
-      this._gainOutNode = pdGlob.audio.context.createGain()
-      this._waveShaperNode = pdGlob.audio.context.createWaveShaper()
-
-      this._gainInNode.connect(this._waveShaperNode)
-      //this._waveShaperNode.connect(this._gainOutNode)
-      
-      this.i(0).setWaa(this._gainInNode, 0)
-      //this.o(0).setWaa(this._gainOutNode, 0)
-      this.o(0).setWaa(this._waveShaperNode, 0)
-
-      this._updateGains()
-    },
-
-    stop: function() {
-      this._gainInNode = null
-      this._waveShaperNode = null
-      this._gainOutNode.disconnect()
-      this._gainOutNode = null
-    },
-
-    _updateGains: function() {
-      if (this._waveShaperNode) {
-        var bound = Math.max(Math.abs(this.minValue), Math.abs(this.maxValue))
-          , sampleRate = pdGlob.audio.sampleRate
-          , curve = new Float32Array(sampleRate)
-          , i, acc = -bound, k = bound * 2 / sampleRate
-        for (i = 0; i < sampleRate; i++) {
-          if (acc >= this.minValue && acc <= this.maxValue) curve[i] = acc
-          else if (acc > this.maxValue) curve[i] = this.maxValue
-          else curve[i] = this.minValue
-          acc += k
-        }
-        this._waveShaperNode.curve = curve
-        this._gainInNode.gain.setValueAtTime(bound !== 0 ? 1 / bound : 0, 0)
-        //this._gainOutNode.gain.setValueAtTime(bound, 0)
-      }
-    }
-
-  })
-
-
-  library['dac~'] = PdObject.extend({
-    type: 'dac~',
-
-    endPoint: true,
-
-    inletDefs: [portlets.DspInlet, portlets.DspInlet],
-
-    start: function() {
-      this.i(0).setWaa(pdGlob.audio.channels[0], 0)
-      this.i(1).setWaa(pdGlob.audio.channels[1], 0)
-    }
-
-  })
-
-
-  library['adc~'] = PdObject.extend({
-    type: 'adc~',
-
-    outletDefs: [portlets.DspOutlet, portlets.DspOutlet],
-
-    init: function() {
-      this.stream = null
-    },
-
-    start: function() {
-      var self = this
-      if (this.stream) this._updateSource()
-      else {
-        this.o(0).setWaa(pdGlob.audio.context.createGain(), 0)
-        this.o(1).setWaa(pdGlob.audio.context.createGain(), 0)
-        pdGlob.audio.getUserMedia(function(err, stream) {
-          if (err) return console.error('error obtaining mic input : ' + err)
-          self.stream = stream
-          if (pdGlob.isStarted) self._updateSource()
-        })
-      }
-    },
-
-    stop: function() {
-      this._sourceNode.disconnect()
-      this._sourceNode = null
-      this._splitterNode = null
-    },
-
-    _updateSource: function() {
-      if (this.stream) {
-        this._sourceNode = pdGlob.audio.context.createMediaStreamSource(this.stream)
-        this._splitterNode = pdGlob.audio.context.createChannelSplitter(2)
-        this._sourceNode.connect(this._splitterNode)
-        this.o(0).setWaa(this._splitterNode, 0)
-        this.o(1).setWaa(this._splitterNode, 1)
-      }
-    }
-
-  })
-
-}
-
-},{"../core/PdObject":6,"../core/mixins":9,"../core/utils":11,"../global":12,"./portlets":18,"underscore":36,"waaoffsetnode":39,"waatablenode":41,"waawhitenoisenode":43}],17:[function(require,module,exports){
-/*
- * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
- *
- *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
- *
- *  WebPd is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  WebPd is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
-
-var _ = require('underscore')
-  , getUserMedia = require('getusermedia')
-  , WAAClock = require('waaclock')
-  , pdGlob = require('../global')
-
-
-var Audio = exports.Audio = function(opts) {
-  if (typeof AudioContext === 'undefined') 
-    return console.error('this environment doesn\'t support Web Audio API')
-  this.channelCount = opts.channelCount
-  this.setContext(opts.audioContext || new AudioContext)
-  this.sampleRate = this.context.sampleRate
-  this.stream = null
-  Object.defineProperty(this, 'time', {
-    get: function() { return this.context.currentTime * 1000 },
-  })
-}
-
-Audio.prototype.start = function() {}
-
-Audio.prototype.stop = function() {}
-
-Audio.prototype.decode = function(arrayBuffer, done) {
-  this.context.decodeAudioData(arrayBuffer, 
-    function(audioBuffer) {
-      var chArrays = [], ch
-      for (ch = 0; ch < audioBuffer.numberOfChannels; ch++)
-        chArrays.push(audioBuffer.getChannelData(ch))
-      done(null, chArrays)
-    },
-    function(err) {
-      done(new Error('error decoding ' + err))
-    }
-  )
-}
-
-Audio.prototype.getUserMedia = function(done) {
-  var self = this
-  if (this.stream) done(null, this.stream)
-  else {
-    getUserMedia({
-      audio: {
-        mandatory: {
-          googEchoCancellation: false,
-          googAutoGainControl: false,
-          googNoiseSuppression: false,
-          googTypingNoiseDetection: false
-        }
-      }
-    }, function (err, stream) {
-      self.stream = stream
-      done(err, stream)
-    })
-  }
-}
-
-Audio.prototype.setContext = function(context) {
-  var ch
-  this.context = context
-  this._channelMerger = this.context.createChannelMerger(this.channelCount)
-  this._channelMerger.connect(this.context.destination)
-  this.channels = []
-  for (ch = 0; ch < this.channelCount; ch++) {
-    this.channels.push(this.context.createGain())
-    this.channels[ch].connect(this._channelMerger, 0, ch)
-  }
-}
-
-
-var Midi = exports.Midi = function() {
-  this._midiInput = null
-  this._callback = function() {}
-}
-
-Midi.prototype.onMessage = function(callback) {
-  this._callback = callback
-}
-
-Midi.prototype.getMidiInput = function() {
-  return this._midiInput
-}
-
-// Associate a MIDIInput object per the Web MIDI spec
-// See <https://www.w3.org/TR/webmidi/#midiinput-interface>
-// Set to `null` to deactivate midi input
-Midi.prototype.setMidiInput = function(midiInput) {
-  if (midiInput === this._midiInput)
-    return
-  if (this._midiInput)
-    this._midiInput.removeEventListener('midimessage', this._callback)
-  this._midiInput = midiInput
-  if (this._midiInput)
-    this._midiInput.addEventListener('midimessage', this._callback)
-}
-
-
-// A little wrapper to WAAClock, to implement the Clock interface.
-var Clock = exports.Clock = function(opts) {
-  var self = this
-  this._audioContext = opts.audioContext
-  this._waaClock = opts.waaClock || new WAAClock(opts.audioContext)
-  this._waaClock.start()
-  Object.defineProperty(this, 'time', {
-    get: function() { return self._audioContext.currentTime * 1000 }
-  })
-}
-
-Clock.prototype.schedule = function(func, time, repetition) {
-  var _func = function(event) {
-      // In case the event is executed immediately
-      if (event.timeTag == undefined)
-        event.timeTag = event.deadline * 1000 
-      func(event)
-    }
-    , event = this._waaClock.callbackAtTime(_func, time / 1000)
-
-  Object.defineProperty(event, 'timeTag', {
-    get: function() { return this.deadline * 1000 }
-  })
-
-  if (_.isNumber(repetition)) event.repeat(repetition / 1000)
-  return event
-}
-
-Clock.prototype.unschedule = function(event) {
-  event.clear()
-}
-
-
-var WebStorage = exports.Storage = function() {}
-
-// Gets an array buffer through an ajax request, then calls `done(err, arrayBuffer)`
-WebStorage.prototype.get = function(url, done) {
-  var req = new XMLHttpRequest()
-
-  req.onload = function(e) {
-    if (this.status === 200)
-      done(null, this.response)
-    else done(new Error('HTTP ' + this.status + ': ' + this.statusText))
-  }
-
-  req.onerror = function(e) {
-    done(e)
-  }
-
-  req.open('GET', url, true)
-  req.responseType = 'arraybuffer'
-  req.send()
-}
-},{"../global":12,"getusermedia":24,"underscore":36,"waaclock":37}],18:[function(require,module,exports){
+},{"./core/PdObject":6,"./core/mixins":9,"./core/utils":11,"./global":12,"./waa/portlets":21,"underscore":39}],21:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -4576,7 +3972,7 @@ exports.declareObjects = function(library) {
 
 }
 
-},{"../core/PdObject":6,"../core/portlets":10,"../core/utils":11,"../global":12,"underscore":36,"waawire":45}],19:[function(require,module,exports){
+},{"../core/PdObject":6,"../core/portlets":10,"../core/utils":11,"../global":12,"underscore":39,"waawire":40}],22:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -4879,7 +4275,7 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],20:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -4904,7 +4300,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],21:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -4992,14 +4388,14 @@ process.chdir = function (dir) {
     throw new Error('process.chdir is not supported');
 };
 
-},{}],22:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],23:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -5589,7 +4985,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":22,"_process":21,"inherits":20}],24:[function(require,module,exports){
+},{"./support/isBuffer":25,"_process":24,"inherits":23}],27:[function(require,module,exports){
 // getUserMedia helper by @HenrikJoreteg used for navigator.getUserMedia shim
 var adapter = require('webrtc-adapter');
 
@@ -5672,7 +5068,7 @@ module.exports = function (constraints, cb) {
     });
 };
 
-},{"webrtc-adapter":25}],25:[function(require,module,exports){
+},{"webrtc-adapter":28}],28:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -5764,7 +5160,7 @@ module.exports = function (constraints, cb) {
   }
 })();
 
-},{"./chrome/chrome_shim":26,"./edge/edge_shim":29,"./firefox/firefox_shim":30,"./safari/safari_shim":32,"./utils":33}],26:[function(require,module,exports){
+},{"./chrome/chrome_shim":29,"./edge/edge_shim":32,"./firefox/firefox_shim":33,"./safari/safari_shim":35,"./utils":36}],29:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -6009,7 +5405,7 @@ module.exports = {
   reattachMediaStream: chromeShim.reattachMediaStream
 };
 
-},{"../utils.js":33,"./getusermedia":27}],27:[function(require,module,exports){
+},{"../utils.js":36,"./getusermedia":30}],30:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -6150,7 +5546,7 @@ module.exports = function() {
   }
 };
 
-},{"../utils.js":33}],28:[function(require,module,exports){
+},{"../utils.js":36}],31:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -6648,7 +6044,7 @@ SDPUtils.getDirection = function(mediaSection, sessionpart) {
 // Expose public methods.
 module.exports = SDPUtils;
 
-},{}],29:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -7604,7 +7000,7 @@ module.exports = {
   reattachMediaStream: edgeShim.reattachMediaStream
 };
 
-},{"../utils":33,"./edge_sdp":28}],30:[function(require,module,exports){
+},{"../utils":36,"./edge_sdp":31}],33:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -7847,7 +7243,7 @@ module.exports = {
   reattachMediaStream: firefoxShim.reattachMediaStream
 };
 
-},{"../utils":33,"./getusermedia":31}],31:[function(require,module,exports){
+},{"../utils":36,"./getusermedia":34}],34:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -7964,7 +7360,7 @@ module.exports = function() {
   }
 };
 
-},{"../utils":33}],32:[function(require,module,exports){
+},{"../utils":36}],35:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -8000,7 +7396,7 @@ module.exports = {
   // reattachMediaStream: safariShim.reattachMediaStream
 };
 
-},{}],33:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 /*
  *  Copyright (c) 2016 The WebRTC project authors. All Rights Reserved.
  *
@@ -8145,7 +7541,7 @@ module.exports = {
   extractVersion: utils.extractVersion
 };
 
-},{}],34:[function(require,module,exports){
+},{}],37:[function(require,module,exports){
 /*
  * Copyright (c) 2012-2015 Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -8488,7 +7884,7 @@ var parseControls = function(proto, args, layout) {
 
 }
 
-},{"underscore":35}],35:[function(require,module,exports){
+},{"underscore":38}],38:[function(require,module,exports){
 //     Underscore.js 1.4.4
 //     http://underscorejs.org
 //     (c) 2009-2013 Jeremy Ashkenas, DocumentCloud Inc.
@@ -9716,7 +9112,7 @@ var parseControls = function(proto, args, layout) {
 
 }).call(this);
 
-},{}],36:[function(require,module,exports){
+},{}],39:[function(require,module,exports){
 //     Underscore.js 1.8.3
 //     http://underscorejs.org
 //     (c) 2009-2015 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
@@ -11266,374 +10662,11 @@ var parseControls = function(proto, args, layout) {
   }
 }.call(this));
 
-},{}],37:[function(require,module,exports){
-var WAAClock = require('./lib/WAAClock')
-
-module.exports = WAAClock
-if (typeof window !== 'undefined') window.WAAClock = WAAClock
-
-},{"./lib/WAAClock":38}],38:[function(require,module,exports){
-(function (process){
-var isBrowser = (typeof window !== 'undefined')
-
-var CLOCK_DEFAULTS = {
-  toleranceLate: 0.10,
-  toleranceEarly: 0.001
-}
-
-// ==================== Event ==================== //
-var Event = function(clock, deadline, func) {
-  this.clock = clock
-  this.func = func
-  this._cleared = false // Flag used to clear an event inside callback
-
-  this.toleranceLate = clock.toleranceLate
-  this.toleranceEarly = clock.toleranceEarly
-  this._latestTime = null
-  this._earliestTime = null
-  this.deadline = null
-  this.repeatTime = null
-
-  this.schedule(deadline)
-}
-
-// Unschedules the event
-Event.prototype.clear = function() {
-  this.clock._removeEvent(this)
-  this._cleared = true
-  return this
-}
-
-// Sets the event to repeat every `time` seconds.
-Event.prototype.repeat = function(time) {
-  if (time === 0)
-    throw new Error('delay cannot be 0')
-  this.repeatTime = time
-  if (!this.clock._hasEvent(this))
-    this.schedule(this.deadline + this.repeatTime)
-  return this
-}
-
-// Sets the time tolerance of the event.
-// The event will be executed in the interval `[deadline - early, deadline + late]`
-// If the clock fails to execute the event in time, the event will be dropped.
-Event.prototype.tolerance = function(values) {
-  if (typeof values.late === 'number')
-    this.toleranceLate = values.late
-  if (typeof values.early === 'number')
-    this.toleranceEarly = values.early
-  this._refreshEarlyLateDates()
-  if (this.clock._hasEvent(this)) {
-    this.clock._removeEvent(this)
-    this.clock._insertEvent(this)
-  }
-  return this
-}
-
-// Returns true if the event is repeated, false otherwise
-Event.prototype.isRepeated = function() { return this.repeatTime !== null }
-
-// Schedules the event to be ran before `deadline`.
-// If the time is within the event tolerance, we handle the event immediately.
-// If the event was already scheduled at a different time, it is rescheduled.
-Event.prototype.schedule = function(deadline) {
-  this._cleared = false
-  this.deadline = deadline
-  this._refreshEarlyLateDates()
-
-  if (this.clock.context.currentTime >= this._earliestTime) {
-    this._execute()
-  
-  } else if (this.clock._hasEvent(this)) {
-    this.clock._removeEvent(this)
-    this.clock._insertEvent(this)
-  
-  } else this.clock._insertEvent(this)
-}
-
-Event.prototype.timeStretch = function(tRef, ratio) {
-  if (this.isRepeated())
-    this.repeatTime = this.repeatTime * ratio
-
-  var deadline = tRef + ratio * (this.deadline - tRef)
-  // If the deadline is too close or past, and the event has a repeat,
-  // we calculate the next repeat possible in the stretched space.
-  if (this.isRepeated()) {
-    while (this.clock.context.currentTime >= deadline - this.toleranceEarly)
-      deadline += this.repeatTime
-  }
-  this.schedule(deadline)
-}
-
-// Executes the event
-Event.prototype._execute = function() {
-  if (this.clock._started === false) return
-  this.clock._removeEvent(this)
-
-  if (this.clock.context.currentTime < this._latestTime)
-    this.func(this)
-  else {
-    if (this.onexpired) this.onexpired(this)
-    console.warn('event expired')
-  }
-  // In the case `schedule` is called inside `func`, we need to avoid
-  // overrwriting with yet another `schedule`.
-  if (!this.clock._hasEvent(this) && this.isRepeated() && !this._cleared)
-    this.schedule(this.deadline + this.repeatTime) 
-}
-
-// Updates cached times
-Event.prototype._refreshEarlyLateDates = function() {
-  this._latestTime = this.deadline + this.toleranceLate
-  this._earliestTime = this.deadline - this.toleranceEarly
-}
-
-// ==================== WAAClock ==================== //
-var WAAClock = module.exports = function(context, opts) {
-  var self = this
-  opts = opts || {}
-  this.tickMethod = opts.tickMethod || 'ScriptProcessorNode'
-  this.toleranceEarly = opts.toleranceEarly || CLOCK_DEFAULTS.toleranceEarly
-  this.toleranceLate = opts.toleranceLate || CLOCK_DEFAULTS.toleranceLate
-  this.context = context
-  this._events = []
-  this._started = false
-}
-
-// ---------- Public API ---------- //
-// Schedules `func` to run after `delay` seconds.
-WAAClock.prototype.setTimeout = function(func, delay) {
-  return this._createEvent(func, this._absTime(delay))
-}
-
-// Schedules `func` to run before `deadline`.
-WAAClock.prototype.callbackAtTime = function(func, deadline) {
-  return this._createEvent(func, deadline)
-}
-
-// Stretches `deadline` and `repeat` of all scheduled `events` by `ratio`, keeping
-// their relative distance to `tRef`. In fact this is equivalent to changing the tempo.
-WAAClock.prototype.timeStretch = function(tRef, events, ratio) {
-  events.forEach(function(event) { event.timeStretch(tRef, ratio) })
-  return events
-}
-
-// Removes all scheduled events and starts the clock 
-WAAClock.prototype.start = function() {
-  if (this._started === false) {
-    var self = this
-    this._started = true
-    this._events = []
-
-    if (this.tickMethod === 'ScriptProcessorNode') {
-      var bufferSize = 256
-      // We have to keep a reference to the node to avoid garbage collection
-      this._clockNode = this.context.createScriptProcessor(bufferSize, 1, 1)
-      this._clockNode.connect(this.context.destination)
-      this._clockNode.onaudioprocess = function () {
-        process.nextTick(function() { self._tick() })
-      }
-    } else if (this.tickMethod === 'manual') null // _tick is called manually
-
-    else throw new Error('invalid tickMethod ' + this.tickMethod)
-  }
-}
-
-// Stops the clock
-WAAClock.prototype.stop = function() {
-  if (this._started === true) {
-    this._started = false
-    this._clockNode.disconnect()
-  }  
-}
-
-// ---------- Private ---------- //
-
-// This function is ran periodically, and at each tick it executes
-// events for which `currentTime` is included in their tolerance interval.
-WAAClock.prototype._tick = function() {
-  var event = this._events.shift()
-
-  while(event && event._earliestTime <= this.context.currentTime) {
-    event._execute()
-    event = this._events.shift()
-  }
-
-  // Put back the last event
-  if(event) this._events.unshift(event)
-}
-
-// Creates an event and insert it to the list
-WAAClock.prototype._createEvent = function(func, deadline) {
-  return new Event(this, deadline, func)
-}
-
-// Inserts an event to the list
-WAAClock.prototype._insertEvent = function(event) {
-  this._events.splice(this._indexByTime(event._earliestTime), 0, event)
-}
-
-// Removes an event from the list
-WAAClock.prototype._removeEvent = function(event) {
-  var ind = this._events.indexOf(event)
-  if (ind !== -1) this._events.splice(ind, 1)
-}
-
-// Returns true if `event` is in queue, false otherwise
-WAAClock.prototype._hasEvent = function(event) {
- return this._events.indexOf(event) !== -1
-}
-
-// Returns the index of the first event whose deadline is >= to `deadline`
-WAAClock.prototype._indexByTime = function(deadline) {
-  // performs a binary search
-  var low = 0
-    , high = this._events.length
-    , mid
-  while (low < high) {
-    mid = Math.floor((low + high) / 2)
-    if (this._events[mid]._earliestTime < deadline)
-      low = mid + 1
-    else high = mid
-  }
-  return low
-}
-
-// Converts from relative time to absolute time
-WAAClock.prototype._absTime = function(relTime) {
-  return relTime + this.context.currentTime
-}
-
-// Converts from absolute time to relative time 
-WAAClock.prototype._relTime = function(absTime) {
-  return absTime - this.context.currentTime
-}
-}).call(this,require('_process'))
-},{"_process":21}],39:[function(require,module,exports){
-var WAAOffsetNode = require('./lib/WAAOffsetNode')
-module.exports = WAAOffsetNode
-if (typeof window !== 'undefined') window.WAAOffsetNode = WAAOffsetNode
-},{"./lib/WAAOffsetNode":40}],40:[function(require,module,exports){
-var WAAOffsetNode = module.exports = function(context) {
-  this.context = context
-
-  // Ones generator. We use only a single generator 
-  // for all WAAOfsetNodes in the same AudioContext
-  this._ones = WAAOffsetNode._ones.filter(function(ones) {
-    return ones.context === context
-  })[0]
-  if (this._ones) this._ones = this._ones.ones 
-  else {
-    var buffer = context.createBuffer(1, 1024, context.sampleRate)
-      , i, channelArray = buffer.getChannelData(0)
-    for (i = 0; i < buffer.length; i++) channelArray[i] = 1
-    this._ones = context.createBufferSource()
-    this._ones.buffer = buffer
-    this._ones.loop = true
-    this._ones.start(0)
-    WAAOffsetNode._ones.push({ context: context, ones: this._ones })
-  }
-
-  // Multiplier
-  this._output = context.createGain()
-  this._ones.connect(this._output)
-  this.offset = this._output.gain
-  this.offset.value = 0
-}
-
-WAAOffsetNode.prototype.connect = function() {
-  this._output.connect.apply(this._output, arguments)
-}
-
-WAAOffsetNode.prototype.disconnect = function() {
-  this._output.disconnect.apply(this._output, arguments)
-}
-
-WAAOffsetNode._ones = []
-},{}],41:[function(require,module,exports){
-var WAATableNode = require('./lib/WAATableNode')
-module.exports = WAATableNode
-if (typeof window !== 'undefined') window.WAATableNode = WAATableNode
-},{"./lib/WAATableNode":42}],42:[function(require,module,exports){
-var WAAOffset = require('waaoffsetnode')
-
-var WAATableNode = module.exports = function(context) {
-  this.context = context
-  this._output = context.createWaveShaper()
-  this._positionNode = new WAAOffset(context)
-  this._positionNode.connect(this._output)
-  this._positionNode.offset.value = -1
-  this.position = context.createGain()
-  this.position.connect(this._positionNode.offset)
-  this.position.gain.value = 0
-  
-  this._table = null
-  Object.defineProperty(this, 'table', {
-    get: function() { return this._table },
-    set: function(table) { this._setTable(table) },
-  })
-}
-
-WAATableNode.prototype.connect = function() {
-  this._output.connect.apply(this._output, arguments)
-}
-
-WAATableNode.prototype.disconnect = function() {
-  this._output.disconnect.apply(this._output, arguments)
-}
-
-WAATableNode.prototype._setTable = function(table) {
-  if (table instanceof AudioBuffer)
-    table = table.getChannelData(0)
-  this._table = table
-  if (table === null) return
-  this._output.curve = table
-  this.position.gain.setValueAtTime(2 / (table.length - 1), 0)
-}
-},{"waaoffsetnode":39}],43:[function(require,module,exports){
-var WAAWhiteNoiseNode = require('./lib/WAAWhiteNoiseNode')
-module.exports = WAAWhiteNoiseNode
-if (typeof window !== 'undefined') window.WAAWhiteNoiseNode = WAAWhiteNoiseNode
-},{"./lib/WAAWhiteNoiseNode":44}],44:[function(require,module,exports){
-var WAAWhiteNoiseNode = module.exports = function(context) {
-  this.context = context
-
-  // Generate a random buffer
-  this._buffer = context.createBuffer(1, 131072, context.sampleRate)
-  var channelArray = this._buffer.getChannelData(0), i
-  for (i = 0; i < 131072; i++) 
-    channelArray[i] = (Math.random() * 2) - 1
-
-  this._prepareOutput()
-}
-
-WAAWhiteNoiseNode.prototype.connect = function() {
-  this._output.connect.apply(this._output, arguments)
-}
-
-WAAWhiteNoiseNode.prototype.disconnect = function() {
-  this._output.disconnect.apply(this._output, arguments)
-}
-
-WAAWhiteNoiseNode.prototype.start = function() {
-  this._output.start.apply(this._output, arguments)
-}
-
-WAAWhiteNoiseNode.prototype.stop = function() {
-  this._output.stop.apply(this._output, arguments)
-  this._prepareOutput()
-}
-
-WAAWhiteNoiseNode.prototype._prepareOutput = function() {
-  this._output = this.context.createBufferSource()
-  this._output.buffer = this._buffer
-  this._output.loop = true
-}
-},{}],45:[function(require,module,exports){
+},{}],40:[function(require,module,exports){
 var WAAWire = require('./lib/WAAWire')
 module.exports = WAAWire
 if (typeof window !== 'undefined') window.WAAWire = WAAWire
-},{"./lib/WAAWire":46}],46:[function(require,module,exports){
+},{"./lib/WAAWire":41}],41:[function(require,module,exports){
 var WAAWire = module.exports = function(context) {
   this.context = context
   

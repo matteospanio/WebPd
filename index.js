@@ -25,8 +25,8 @@ var _ = require('underscore')
   , PdObject = require('./lib/core/PdObject')
   , mixins = require('./lib/core/mixins')
   , errors = require('./lib/core/errors')
-  , portlets = require('./lib/waa/portlets')
-  , waa = require('./lib/waa/interfaces')
+  , portlets = require('./lib/js-dsp/portlets')
+  , jsDsp = require('./lib/js-dsp/interfaces')
   , pdGlob = require('./lib/global')
   , interfaces = require('./lib/core/interfaces')
   , patchIds = _.extend({}, mixins.UniqueIdsMixin)
@@ -43,26 +43,27 @@ var Pd = module.exports = {
     if (!pdGlob.isStarted) {
 
       if (typeof AudioContext !== 'undefined') {
-        pdGlob.audio = opts.audio || new waa.Audio({
-          channelCount : pdGlob.settings.channelCount,
-          audioContext: opts.audioContext
+        pdGlob.audio = opts.audio || new jsDsp.Audio({
+          audioContext: opts.audioContext || new AudioContext
         })
-        pdGlob.clock = opts.clock || new waa.Clock({
+        pdGlob.clock = opts.clock || new jsDsp.Clock({
           audioContext: pdGlob.audio.context,
-          waaClock: opts.waaClock
         })
-        pdGlob.midi = opts.midi || new waa.Midi()
+        pdGlob.midi = opts.midi || new jsDsp.Midi()
 
       // TODO : handle other environments better than like this
       } else {
         pdGlob.audio = opts.audio || interfaces.Audio
         pdGlob.clock = opts.clock || interfaces.Clock
+        
+        pdGlob.clock = opts.clock || new jsDsp.Clock()
+        
         pdGlob.midi = opts.midi || interfaces.Midi
       }
 
       if (opts.storage) pdGlob.storage = opts.storage
       else if (typeof window !== 'undefined')
-        pdGlob.storage = new waa.Storage()
+        pdGlob.storage = new jsDsp.Storage()
       else pdGlob.storage = interfaces.Storage
 
       pdGlob.midi.onMessage(function(midiMessage) {
@@ -210,6 +211,7 @@ var Pd = module.exports = {
   },
 
   core: {
+    interfaces: jsDsp,
     PdObject: PdObject,
     portlets: portlets,
     errors: errors
@@ -221,3 +223,4 @@ var Pd = module.exports = {
 }
 
 if (typeof window !== 'undefined') window.Pd = Pd
+else if (typeof self !== 'undefined') self.Pd = Pd

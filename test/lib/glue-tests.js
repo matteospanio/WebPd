@@ -1273,12 +1273,15 @@ describe('glue', function() {
 
   describe('[metro]', function() {
 
-    var clock
-    beforeEach(function() { clock = new helpers.TestClock() })
+    var clock, audio
+    beforeEach(function() { 
+      clock = new helpers.TestClock() 
+      audio = new helpers.TestAudio()
+    })
 
     it('shouĺd start/stop the metro when sending to first inlet', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var metro = patch.createObject('metro', [1000])
         , mailbox = patch.createObject('testingmailbox')
       metro.o(0).connect(mailbox.i(0))
@@ -1286,26 +1289,26 @@ describe('glue', function() {
       clock.tick()
       assert.deepEqual(mailbox.received, [])
 
-      clock.time = 10000
+      audio.time = 10000
       metro.i(0).message(['bang'])
       assert.deepEqual(mailbox.received, [['bang']])
 
-      clock.time = 10900
+      audio.time = 10900
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang']])
 
-      clock.time = 11000
+      audio.time = 11000
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang']])
 
-      clock.time = 12000
+      audio.time = 12000
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang'], ['bang']])
 
       // stopping metro
       mailbox.received = []
       metro.i(0).message([0])
-      clock.time = 13000
+      audio.time = 13000
       clock.tick()
       assert.deepEqual(mailbox.received, [])
 
@@ -1313,31 +1316,31 @@ describe('glue', function() {
       metro.i(0).message([123])
       assert.deepEqual(mailbox.received, [['bang']])
 
-      clock.time = 14000
+      audio.time = 14000
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang']])
     })
 
     it('should change the rate when sending to the second inlet', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var metro = patch.createObject('metro', [1000])
         , mailbox = patch.createObject('testingmailbox')
       metro.o(0).connect(mailbox.i(0))
 
-      clock.time = 10000
+      audio.time = 10000
       metro.i(0).message(['bang'])
       assert.deepEqual(mailbox.received, [['bang']])
 
       metro.i(1).message([1200])
-      clock.time = 11000
+      audio.time = 11000
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang']])
 
-      clock.time = 12000
+      audio.time = 12000
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang']])
-      clock.time = 12200
+      audio.time = 12200
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang'], ['bang']])
     })
@@ -1345,12 +1348,12 @@ describe('glue', function() {
     // Test for a bug fix
     it('shouldnt schedule two events if sending to the two inlets simultaneously', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var metro = patch.createObject('metro', [1000])
         , mailbox = patch.createObject('testingmailbox')
       metro.o(0).connect(mailbox.i(0))
 
-      clock.time = 10000
+      audio.time = 10000
       metro.i(1).message([1000])
       metro.i(0).message(['bang'])
       assert.deepEqual(mailbox.received, [['bang']])
@@ -1359,29 +1362,29 @@ describe('glue', function() {
 
     it('should stop ticking when destroyed', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var metro = patch.createObject('metro', [1000])
         , mailbox = patch.createObject('testingmailbox')
       metro.o(0).connect(mailbox.i(0))
 
-      clock.time = 10000
+      audio.time = 10000
       metro.i(0).message(['bang'])
       assert.deepEqual(mailbox.received, [['bang']])
 
       metro.destroy()
-      clock.time = 11000
+      audio.time = 11000
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang']])
     })
 
     it('should start ticking at timeTag', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var metro = patch.createObject('metro', [1000])
         , mailbox = patch.createObject('testingmailbox')
       metro.o(0).connect(mailbox.i(0))
 
-      clock.time = 10000
+      audio.time = 10000
       metro.i(0).message(utils.timeTag(['bang'], 10010))
       assert.equal(clock.events.length, 1)
       assert.equal(clock.events[0].timeTag, 10010)
@@ -1389,31 +1392,31 @@ describe('glue', function() {
 
     it('should add a timeTag to the output bangs', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var metro = patch.createObject('metro', [1000])
         , mailbox = patch.createObject('testingmailbox')
       metro.o(0).connect(mailbox.i(0))
 
-      clock.time = 10000
+      audio.time = 10000
       metro.i(0).message(utils.timeTag(['bang'], 10010))
-      clock.time = 10010
+      audio.time = 10010
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang']])
       assert.equal(mailbox.rawReceived[0].timeTag, 10010)
 
-      clock.time = 11010
+      audio.time = 11010
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang']])
       assert.equal(mailbox.rawReceived[1].timeTag, 11010)
 
       // Should work fine also when changing rate
       metro.i(1).message([500])
-      clock.time = 12010
+      audio.time = 12010
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang'], ['bang']])
       assert.equal(mailbox.rawReceived[2].timeTag, 12010)
 
-      clock.time = 12510
+      audio.time = 12510
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang'], ['bang'], ['bang']])
       assert.equal(mailbox.rawReceived[3].timeTag, 12510)
@@ -1423,12 +1426,15 @@ describe('glue', function() {
 
   describe('[delay]', function() {
 
-    var clock
-    beforeEach(function() { clock = new helpers.TestClock() })
+    var clock, audio
+    beforeEach(function() { 
+      clock = new helpers.TestClock() 
+      audio = new helpers.TestAudio()
+    })
 
     it('should send a bang after the delay time', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var delay = patch.createObject('delay', [1100])
         , mailbox = patch.createObject('testingmailbox')
       delay.o(0).connect(mailbox.i(0))
@@ -1436,17 +1442,17 @@ describe('glue', function() {
       delay.i(0).message(['bang'])
       clock.tick()
       assert.deepEqual(mailbox.received, [])
-      clock.time = 1000
+      audio.time = 1000
       clock.tick()
       assert.deepEqual(mailbox.received, [])
-      clock.time = 1100
+      audio.time = 1100
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang']])
     })
 
     it('should have 0 as a default value', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var delay = patch.createObject('delay')
         , mailbox = patch.createObject('testingmailbox')
       delay.o(0).connect(mailbox.i(0))
@@ -1457,7 +1463,7 @@ describe('glue', function() {
 
     it('should start a delay when sending a number on first inlet', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var delay = patch.createObject('delay', [3000])
         , mailbox = patch.createObject('testingmailbox')
       delay.o(0).connect(mailbox.i(0))
@@ -1465,17 +1471,17 @@ describe('glue', function() {
       delay.i(0).message([1111])
       clock.tick()
       assert.deepEqual(mailbox.received, [])
-      clock.time = 1110
+      audio.time = 1110
       clock.tick()
       assert.deepEqual(mailbox.received, [])
-      clock.time = 1111
+      audio.time = 1111
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang']])
     })
 
     it('should start change delay time when sending number on inlet 1', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var delay = patch.createObject('delay', [3000])
         , mailbox = patch.createObject('testingmailbox')
       delay.o(0).connect(mailbox.i(0))
@@ -1483,38 +1489,38 @@ describe('glue', function() {
       delay.i(1).message([201])
       clock.tick()
       assert.deepEqual(mailbox.received, [])
-      clock.time = 201
+      audio.time = 201
       clock.tick()
       assert.deepEqual(mailbox.received, [])
 
       delay.i(0).message(['bang'])
-      clock.time = 401
+      audio.time = 401
       clock.tick()
       assert.deepEqual(mailbox.received, [])
-      clock.time = 402
+      audio.time = 402
       delay.i(1).message([1000]) // shouldnt make a difference
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang']])
 
       delay.i(0).message(['bang'])
-      clock.time = 1401
+      audio.time = 1401
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang']])
-      clock.time = 1402
+      audio.time = 1402
       clock.tick()
       assert.deepEqual(mailbox.received, [['bang'], ['bang']])
     })
 
     it('should cancel delay when cleaned', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var delay = patch.createObject('delay', [3000])
         , mailbox = patch.createObject('testingmailbox')
       delay.o(0).connect(mailbox.i(0))
 
       delay.i(0).message([1111])
       delay.destroy()
-      clock.time = 1111
+      audio.time = 1111
       clock.tick()
       assert.deepEqual(mailbox.received, [])
     })
@@ -1535,44 +1541,47 @@ describe('glue', function() {
 
   describe('[timer]', function() {
 
-    var clock
-    beforeEach(function() { clock = new helpers.TestClock() })
+    var clock, audio
+    beforeEach(function() { 
+      clock = new helpers.TestClock()
+      audio = new helpers.TestAudio()
+    })
 
     it('should be started on creation', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var timer = patch.createObject('timer')
         , mailbox = patch.createObject('testingmailbox')
       timer.o(0).connect(mailbox.i(0))
 
-      clock.time = 1222
+      audio.time = 1222
       timer.i(1).message(['bang'])
       assert.deepEqual(mailbox.received, [[1222]])
     })
 
     it('should be reset when sending a message on the first inlet', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var timer = patch.createObject('timer')
         , mailbox = patch.createObject('testingmailbox')
       timer.o(0).connect(mailbox.i(0))
 
-      clock.time = 3010
+      audio.time = 3010
       timer.i(0).message(['bang'])
       assert.deepEqual(mailbox.received, [])
 
-      clock.time = 4000
+      audio.time = 4000
       timer.i(1).message(['bang'])
       assert.deepEqual(mailbox.received, [[990]])
     })
 
     it('should handle time tags well', function() {
       Pd.stop()
-      Pd.start({clock: clock})
+      Pd.start({ clock: clock, audio: audio })
       var timer = patch.createObject('timer')
         , mailbox = patch.createObject('testingmailbox')
       timer.o(0).connect(mailbox.i(0))
-      clock.time = 1300
+      audio.time = 1300
       timer.i(0).message(['bang'])
 
       timer.i(1).message(utils.timeTag(['bang'], 1333))

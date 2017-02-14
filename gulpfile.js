@@ -22,7 +22,7 @@ gulp.task('lib.browserify', function() {
 })
 
 gulp.task('lib.concat', function() {
-  return gulp.src(['./deps/AudioContextMonkeyPatch.js', './build/webpd-latest.js'])
+  return gulp.src(['./build/webpd-latest.js'])//['./deps/AudioContextMonkeyPatch.js', './build/webpd-latest.js'])
     .pipe(concat('webpd-latest.js'))
     .pipe(gulp.dest('./dist'))
 })

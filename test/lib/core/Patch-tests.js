@@ -41,13 +41,8 @@ describe('core.Patch', function() {
     outletDefs: [ MyOutlet, MyOutlet ]
   })
 
-  var MyEndPoint = PdObject.extend({
-    endPoint: true
-  })
-
   beforeEach(function() {
     pdGlob.library['myobject'] = MyObject
-    pdGlob.library['myendpoint'] = MyEndPoint
   })
 
   afterEach(function() { helpers.afterEach() })
@@ -217,15 +212,6 @@ describe('core.Patch', function() {
       assert.ok(obj.patch === patch)
       assert.ok(_.contains(patch.objects, obj))
       assert.ok(_.isNumber(obj.id))
-    })
-
-    it('should store endpoints', function() {
-      var patch = new Patch
-        , obj = patch.createObject('myobject', [])
-        , endPointObj = patch.createObject('myendpoint', [])
-
-      assert.ok(!_.contains(patch.endPoints, obj))
-      assert.ok(_.contains(patch.endPoints, endPointObj))
     })
 
     it('should throw UnknownObjectError if object unknown', function() {

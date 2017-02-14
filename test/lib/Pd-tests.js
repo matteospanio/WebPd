@@ -15,6 +15,46 @@ var _ = require('underscore')
 
 describe('Pd', function() {
 
+  beforeEach(function() {
+
+    pdGlob.library['outlet'] = PdObject.extend({
+      type: 'outlet',
+      inletDefs: [ portlets.Inlet ],
+      outletDefs: [ portlets.Outlet.extend({ crossPatch: true }) ]
+    })
+
+    pdGlob.library['inlet'] = PdObject.extend({
+      type: 'inlet',
+      inletDefs: [ portlets.Inlet.extend({ crossPatch: true }) ],
+      outletDefs: [ portlets.Outlet ]
+    })
+
+    pdGlob.library['outlet~'] = PdObject.extend({
+      type: 'outlet~',
+      inletDefs: [ portlets.Inlet ],
+      outletDefs: [ portlets.Outlet.extend({ crossPatch: true }) ],
+    })
+
+    pdGlob.library['inlet~'] = PdObject.extend({
+      type: 'inlet~',
+      inletDefs: [ portlets.Inlet.extend({ crossPatch: true }) ],
+      outletDefs: [ portlets.Outlet ],
+    })
+
+    pdGlob.library['osc~'] = PdObject.extend({
+      type: 'osc~',
+      inletDefs: [ portlets.Inlet, portlets.Inlet ],
+      outletDefs: [ portlets.Outlet ],
+      init: function(args) {
+        this.frequency = args[0]
+      }
+    })
+
+    pdGlob.library['dac~'] = PdObject.extend({
+      type: 'dac~',
+      inletDefs: [ portlets.Inlet, portlets.Inlet ],
+    })
+  })
   afterEach(function() { helpers.afterEach() })
 
   describe('.start', function() {
@@ -98,13 +138,14 @@ describe('Pd', function() {
   describe('.registerAbstraction', function() {
 
     it('should register abstractions rightly', function() {
+
       var abstraction = {
         nodes: [
-          {id: 0, proto: 'osc~', args: ['$1']},
-          {id: 1, proto: 'outlet~'}
+          { id: 0, proto: 'osc~', args: ['$1'] },
+          { id: 1, proto: 'outlet~' }
         ],
         connections: [
-          {source: {id: 0, port: 0}, sink: {id: 1, port: 0}}
+          { source: { id: 0, port: 0 }, sink: { id: 1, port: 0 } }
         ]
       }
       Pd.registerAbstraction('dumbOsc', abstraction)
