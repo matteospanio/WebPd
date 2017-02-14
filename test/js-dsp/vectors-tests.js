@@ -59,12 +59,10 @@ describe('js-dsp.vectors', function() {
 
   describe('cos', function() {
 
-    it('should return the phase if frequency is 0', function() {
+    it('should return the cos of phase if frequency is 0', function() {
       var destination = new Float32Array(4)
-
       vectors.cos(destination, 0, 0)
       helpers.assertAboutEqual(destination, new Float32Array([ 1, 1, 1, 1 ]))
-
       vectors.cos(destination, Math.PI / 2, 0)
       helpers.assertAboutEqual(destination, new Float32Array([ 0, 0, 0, 0 ]))
     })
@@ -111,49 +109,123 @@ describe('js-dsp.vectors', function() {
 
   })
 
-  describe('sawtooth', function() {
+  describe('phasor', function() {
 
     it('should return the phase if frequency is 0', function() {
       var destination = new Float32Array(4)
-
-      vectors.sawtooth(destination, 0, 0)
+      vectors.phasor(destination, 0, 0)
       helpers.assertAboutEqual(destination, new Float32Array([ 0, 0, 0, 0 ]))
-
-      vectors.sawtooth(destination, 0.5, 0)
+      vectors.phasor(destination, 0.5, 0)
       helpers.assertAboutEqual(destination, new Float32Array([ 0.5, 0.5, 0.5, 0.5 ]))
     })
 
-    it('should compute the sawtooth', function() {
+    it('should compute the phasor', function() {
       var destination = new Float32Array(4)
       var sampleRate = 5
       var phase = 0
 
-      phase = vectors.sawtooth(destination, phase, 1 / sampleRate)
+      phase = vectors.phasor(destination, phase, 1 / sampleRate)
       helpers.assertAboutEqual(destination, 
         new Float32Array([ 0.2, 0.4, 0.6, 0.8 ]))
 
-      phase = vectors.sawtooth(destination, phase, 1 / sampleRate)
+      phase = vectors.phasor(destination, phase, 1 / sampleRate)
       helpers.assertAboutEqual(destination, 
         new Float32Array([ 0, 0.2, 0.4, 0.6 ]))
 
 
-      phase = vectors.sawtooth(destination, phase, 0.5 / sampleRate)
+      phase = vectors.phasor(destination, phase, 0.5 / sampleRate)
       helpers.assertAboutEqual(destination, 
         new Float32Array([ 0.7, 0.8, 0.9, 0 ]))
     })
   })
 
-  describe('variableSawtooth', function() {
+  describe('variablePhasor', function() {
 
     it('should compute the result with input frequencies', function() {
       var destination = new Float32Array(4)
       var sampleRate = 5
       var phase = 0.6 - 1 / sampleRate
 
-      phase = vectors.variableSawtooth(destination, phase, 1 / sampleRate, [ 1, 0.5, 0.2, 0.1 ])
+      phase = vectors.variablePhasor(destination, phase, 1 / sampleRate, [ 1, 0.5, 0.2, 0.1 ])
       helpers.assertAboutEqual(destination, new Float32Array([ 0.6, 0.7, 0.74, 0.76 ]))
-      phase = vectors.variableSawtooth(destination, phase, 1 / sampleRate, [ 1, 0.5, 0.2, 0.1 ])
+      phase = vectors.variablePhasor(destination, phase, 1 / sampleRate, [ 1, 0.5, 0.2, 0.1 ])
       helpers.assertAboutEqual(destination, new Float32Array([ 0.96, 0.06, 0.1, 0.12 ]))
+    })
+
+  })
+
+  describe('triangle', function() {
+
+    it('should return the phase if frequency is 0', function() {
+      var destination = new Float32Array(4)
+      vectors.triangle(destination, 0, 0)
+      helpers.assertAboutEqual(destination, new Float32Array([ -1, -1, -1, -1 ]))
+      vectors.triangle(destination, 0.5, 0)
+      helpers.assertAboutEqual(destination, new Float32Array([ 1, 1, 1, 1 ]))
+      vectors.triangle(destination, 0.9, 0)
+      helpers.assertAboutEqual(destination, new Float32Array([ -0.6, -0.6, -0.6, -0.6 ]))
+    })
+
+    it('should compute the triangle', function() {
+      var destination = new Float32Array(10)
+      var sampleRate = 10
+      var phase = 0
+
+      phase = vectors.triangle(destination, phase, 1 / sampleRate)
+      helpers.assertAboutEqual(destination, 
+        new Float32Array([ -0.6, -0.2, 0.2, 0.6, 1, 0.6, 0.2, -0.2, -0.6, -1 ]))
+      assert.equal(helpers.round(phase), 1)
+    })
+  })
+
+  describe('variableTriangle', function() {
+
+    it('should compute the result with input frequencies', function() {
+      var destination = new Float32Array(5)
+      var sampleRate = 10
+      var phase = 0
+
+      phase = vectors.variableTriangle(destination, phase, 1 / sampleRate, [ 1, 0.5, 1, 0.75, 2 ])
+      helpers.assertAboutEqual(destination, 
+        new Float32Array([ -0.6, -0.4, 0, 0.3, 0.9 ]))
+    })
+
+  })
+
+  describe('square', function() {
+
+    it('should return the phase if frequency is 0', function() {
+      var destination = new Float32Array(4)
+      vectors.square(destination, 0, 0)
+      helpers.assertAboutEqual(destination, new Float32Array([ -1, -1, -1, -1 ]))
+      vectors.square(destination, 0.5, 0)
+      helpers.assertAboutEqual(destination, new Float32Array([ 1, 1, 1, 1 ]))
+      vectors.square(destination, 0.9, 0)
+      helpers.assertAboutEqual(destination, new Float32Array([ 1, 1, 1, 1 ]))
+    })
+
+    it('should compute the square', function() {
+      var destination = new Float32Array(10)
+      var sampleRate = 10
+      var phase = 0
+
+      phase = vectors.square(destination, phase, 1 / sampleRate)
+      helpers.assertAboutEqual(destination, 
+        new Float32Array([ -1, -1, -1, -1, 1, 1, 1, 1, 1, 1 ]))
+      assert.equal(helpers.round(phase), 1)
+    })
+  })
+
+  describe('variableSquare', function() {
+
+    it('should compute the result with input frequencies', function() {
+      var destination = new Float32Array(5)
+      var sampleRate = 10
+      var phase = 0
+
+      phase = vectors.variableSquare(destination, phase, 1 / sampleRate, [ 1, 0.5, 1, 0.75, 2 ])
+      helpers.assertAboutEqual(destination, 
+        new Float32Array([ -1, -1, -1, -1, 1 ]))
     })
 
   })

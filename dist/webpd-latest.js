@@ -2921,8 +2921,20 @@ exports.declareObjects = function(library) {
 
   library['phasor~'] = OscDspObject.extend({
     _computeJ: function() { return 1 / pdGlob.audio.sampleRate },
-    _opVariable: vectors.variableSawtooth,
-    _opConstant: vectors.sawtooth
+    _opVariable: vectors.variablePhasor,
+    _opConstant: vectors.phasor
+  })
+
+  library['triangle~'] = OscDspObject.extend({
+    _computeJ: function() { return 1 / pdGlob.audio.sampleRate },
+    _opVariable: vectors.variableTriangle,
+    _opConstant: vectors.triangle
+  })
+
+  library['square~'] = OscDspObject.extend({
+    _computeJ: function() { return 1 / pdGlob.audio.sampleRate },
+    _opVariable: vectors.variableSquare,
+    _opConstant: vectors.square
   })
 
   library['*~'] = ArithmDspObject.extend({
@@ -2949,12 +2961,25 @@ exports.declareObjects = function(library) {
     _opConstant: vectors.subConstant
   })
 
-  library['phasor~'] = null
-  library['triangle~'] = null
-  library['square~'] = null
-  library['noise~'] = null
+  library['noise~'] = DspObject.extend({
+    outletDefs: [ portlets.DspOutlet ],
+    _runTick: function() { vectors.random(this.outlets[0].buffer, -1, 1) }
+  })
+
+  library['sig~'] = DspObject.extend({
+    inletDefs: [ 
+      portlets.Inlet.extend({
+        message: function(args) {
+          this.obj.setVal(args[0])
+        }
+      }) 
+    ],
+    outletDefs: [ portlets.DspOutlet ],
+    _runTick: function() { vectors.random(this.outlets[0].buffer, -1, 1) }
+  })
+
+
   library['line~'] = null
-  library['sig~'] = null
   library['lop~'] = null
   library['hip~'] = null
   library['bp~'] = null
@@ -3488,7 +3513,7 @@ exports.cos = function(destination, phase, K) {
 exports.variableCos = function(destination, phase, J, frequencies) {
   var i
   var length = destination.length
-  for (i = 0, length = destination.length; i < length; i++) {
+  for (i = 0; i < length; i++) {
     phase += J * frequencies[i]
     destination[i] = Math.cos(phase)
   }
@@ -3496,7 +3521,7 @@ exports.variableCos = function(destination, phase, J, frequencies) {
 }
 
 // K = freq * 1 / sampleRate = freq * J
-exports.sawtooth = function(destination, phase, K) {
+exports.phasor = function(destination, phase, K) {
   var i
   var length = destination.length
   for (i = 0; i < length; i++) {
@@ -3507,16 +3532,86 @@ exports.sawtooth = function(destination, phase, K) {
 }
 
 // J = 1 / sampleRate
-exports.variableSawtooth = function(destination, phase, J, frequencies) {
+exports.variablePhasor = function(destination, phase, J, frequencies) {
   var i
   var length = destination.length
-  for (i = 0, length = destination.length; i < length; i++) {
+  for (i = 0; i < length; i++) {
     phase = (phase + J * frequencies[i]) % 1
     destination[i] = phase
   }
   return phase
 }
 
+// K = freq * 1 / sampleRate = freq * J
+exports.triangle = function(destination, phase, K) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++) {
+    phase = (phase + K) % 1
+    if (phase < 0.5)
+      destination[i] = -1 + 4 * phase
+    else
+      destination[i] = 3 - 4 * phase
+  }
+  return phase
+}
+
+// J = 1 / sampleRate
+exports.variableTriangle = function(destination, phase, J, frequencies) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++) {
+    phase = (phase + J * frequencies[i]) % 1
+    if (phase < 0.5)
+      destination[i] = -1 + 4 * phase
+    else
+      destination[i] = 3 - 4 * phase
+  }
+  return phase
+} 
+
+// K = freq * 1 / sampleRate = freq * J
+exports.square = function(destination, phase, K) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++) {
+    phase = (phase + K) % 1
+    if (phase < 0.5)
+      destination[i] = -1
+    else
+      destination[i] = 1
+  }
+  return phase
+}
+
+// J = 1 / sampleRate
+exports.variableSquare = function(destination, phase, J, frequencies) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++) {
+    phase = (phase + J * frequencies[i]) % 1
+    if (phase < 0.5)
+      destination[i] = -1
+    else
+      destination[i] = 1
+  }
+  return phase
+}
+
+exports.random = function(destination, min, max) {
+  var i
+  var length = destination.length
+  var range = (max - min)
+  for (i = 0; i < length; i++)
+    destination[i] = min + Math.random() * range
+}
+
+exports.constant = function(destination, val) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++)
+    destination[i] = val
+}
 },{}],20:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>, Jacob Stern <jacob.stern@outlook.com>

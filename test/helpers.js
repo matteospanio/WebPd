@@ -28,7 +28,8 @@ exports.assertPreservesTimeTag = function(pdObject, args) {
   assert.equal(mailbox.rawReceived[0].timeTag, timeTag)
 }
 
-var round = function(num, dec) {
+var round = exports.round = function(num, dec) {
+  dec = dec || 6
   return Math.round(num * Math.pow(10, dec)) / Math.pow(10, dec)
 }
 

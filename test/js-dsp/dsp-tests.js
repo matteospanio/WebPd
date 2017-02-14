@@ -150,5 +150,35 @@ describe('js-dsp.dsp', function() {
 
   })
 
+  describe('noise~', function() {
+
+    it('should generate noise', function() {
+      var patch = Pd.createPatch()
+      var obj = patch.createObject('noise~')
+      obj.tick()
+      assert.ok(_.reduce(obj.outlets[0].buffer, function(a, b) { return a + b }, 0) !== 0)
+    })
+    
+  })
+
+  describe('sig~', function() {
+
+    it('should generate constant sig', function() {
+      var patch = Pd.createPatch()
+      var obj = patch.createObject('sig~', [3])
+      var i, buffer = obj.outlets[0].buffer
+      
+      obj.tick()
+      for (i = 0; i < buffer.length; i++)
+        assert.equal(helpers.round(buffer[i]), 3)
+
+      obj.i(0).message([ -8.8 ])
+      audio.frame += audio.blockSize
+      obj.tick()
+      for (i = 0; i < buffer.length; i++)
+        assert.equal(helpers.round(buffer[i]), -8.8)      
+    })
+    
+  })
 
 })
