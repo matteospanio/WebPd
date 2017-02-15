@@ -2785,14 +2785,14 @@ Audio.prototype.pushBuffer = function(ch, offset, buffer) {
 // Pulls a complete block in several steps, stopping each time
 // an event is scheduled
 Audio.prototype.tick = function() {
-  var blockEnd = this.frame + this.blockSize
+  var blockEndFrame = this.frame + this.blockSize
   var endPointsCount = this._endPoints.length
   var offset = 0
   var nextFrame, subBlockSize, i
-  while (this.frame !== blockEnd) {
+  while (this.frame !== blockEndFrame) {
 
     // Pulls next sub-block
-    nextFrame = pdGlob.clock.tick(blockEnd)
+    nextFrame = pdGlob.clock.tick(blockEndFrame)
     subBlockSize = nextFrame - this.frame
     if (subBlockSize) {
       for (i = 0; i < endPointsCount; i++)
@@ -2936,7 +2936,11 @@ Clock.prototype.unschedule = function(event) {
   this._events = _.without(this._events, event)
 }
 
-Clock.prototype.tick = function(blockEnd) {
+// Executes the events scheduled for the current frame, and returns
+// the next frame. 
+// That next frame is either the frame of next event inside the current
+// block, or `blockEndFrame` if there are no events.  
+Clock.prototype.tick = function(blockEndFrame) {
   var frame = pdGlob.audio.frame
 
   // Remove outdated events
@@ -2950,18 +2954,20 @@ Clock.prototype.tick = function(blockEnd) {
     var event = this._events[0]
     event.timeTag = event.frame / pdGlob.audio.sampleRate * 1000
     event.func(event)
+    // If `event` is not in the list anymore, it means the callback has unscheduled
+    // it, therefore we shouldn't reschedule.
     if (event.repetition && this._events.indexOf(event) !== -1) {
       event.frame = event.frame + event.repetition
-      this._insertEvent(event)
-    } else {
       this._events = _.without(this._events, event)
-    }
+      this._insertEvent(event)
+    } else 
+      this._events = _.without(this._events, event)
   }
 
   if (this._events.length)
-    return Math.floor(Math.min(this._events[0].frame, blockEnd))
+    return Math.floor(Math.min(this._events[0].frame, blockEndFrame))
   else
-    return blockEnd
+    return blockEndFrame
 }
 
 Clock.prototype._insertEvent = function(event) {
@@ -3214,44 +3220,48 @@ exports.declareObjects = function(library) {
 
   library['line~'] = engine.DspObject.extend({
 
-    inletTypes: [
+    inletDefs: [
       portlets.Inlet.extend({
         message: function(args) {
           var y1 = args[0]
           var duration = args[1]
-          if (duration !== undefined)
-            this.obj.toDspLine(y1, duration)
+          if (duration)
+            this.obj._toTickVariable(y1, duration)
           else
-            this.obj.toDspConst(y1)
+            this.obj._toTickConstant(y1)
         }
-      })
+      }),
+      portlets.UnimplementedOutlet
     ],
-    outletTypes: [ portlets.DspOutlet ],
+    outletDefs: [ portlets.DspOutlet ],
 
-    init: function() {
-      this.value = 0
-      this.toDspConst()
+    start: function() {
+      engine.DspObject.prototype.start.apply(this, arguments)
+      this._toTickConstant(0)
     },
 
     _runTickConstant: function() {
       vectors.constant(this.outlets[0].getBuffer(), this.value)
+      //console.log('CCC', this.value, this.outlets[0].getBuffer().length)
     },
 
     _runTickVariable: function() {
-      this.value = vectors.ramp(this.outlets[0].getBuffer(), this.value, this.slope)
+      this.value = vectors.ramp(this.outlets[0].getBuffer(), this.value, this.increment)
+      //console.log(this.value, this.outlets[0].getBuffer().length)
     },
 
-    toDspConst: function() {
-      this.dspTick = this.dspTickConst
+    _toTickConstant: function(newValue) {
+      console.log('constant', newValue, pdGlob.audio.frame)
+      this.value = newValue
+      this._runTick = this._runTickConstant
     },
 
-    toDspLine: function(val, duration) {
-      this.slope = (val - this.value) / (duration * this.patch.sampleRate / 1000)
-      this.dspTick = this.dspTickLine
-
-          this.toDspConst()
-          this.emit('end')
-
+    _toTickVariable: function(newValue, duration) {
+      var self = this
+      this.increment = (newValue - this.value) / (duration * pdGlob.audio.sampleRate / 1000)
+      console.log('variable', this.increment, this.value, pdGlob.audio.frame)
+      this._runTick = this._runTickVariable
+      pdGlob.clock.schedule(function() { self._toTickConstant(newValue) }, pdGlob.audio.time + duration - 1)
     }
   })
 
@@ -3424,6 +3434,8 @@ exports.DspInlet = engine.DspInlet
 exports.DspOutlet = engine.DspOutlet
 exports.Inlet = corePortlets.Inlet
 exports.Outlet = corePortlets.Outlet
+exports.UnimplementedInlet = corePortlets.UnimplementedInlet
+exports.UnimplementedOutlet = corePortlets.UnimplementedOutlet
 
 exports.declareObjects = function(library) {
   library['outlet'] = function() {}

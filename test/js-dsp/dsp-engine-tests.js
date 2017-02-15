@@ -100,6 +100,9 @@ describe('js-dsp.dsp-engine', function() {
       audio.frame = clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.085 * audio.sampleRate))
       assert.deepEqual(called, 3)
+
+      // Check that the repeted event has not added some junk
+      assert.equal(clock._events.length, 1)
     })
 
     it('should allow scheduling events from within its own callback', function() {
