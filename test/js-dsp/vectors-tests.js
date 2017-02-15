@@ -230,4 +230,16 @@ describe('js-dsp.vectors', function() {
 
   })
 
+  describe('ramp', function() {
+
+    it('should generate the expected ramp', function() {
+      var destination = new Float32Array(5)
+      var value = vectors.ramp(destination, 0, 1/5)
+      helpers.assertAboutEqual(destination,
+        new Float32Array([ 1/5, 2/5, 3/5, 4/5, 1 ]))
+      assert.equal(value, 1)
+    })
+
+  })
+
 })

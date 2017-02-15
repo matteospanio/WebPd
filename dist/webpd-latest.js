@@ -225,7 +225,7 @@ var Pd = module.exports = {
 
 if (typeof window !== 'undefined') window.Pd = Pd
 else if (typeof self !== 'undefined') self.Pd = Pd
-},{"./lib/core/Abstraction":3,"./lib/core/Patch":5,"./lib/core/PdObject":6,"./lib/core/errors":7,"./lib/core/interfaces":8,"./lib/core/mixins":9,"./lib/global":12,"./lib/index":14,"./lib/js-dsp/interfaces":16,"./lib/js-dsp/portlets":18,"pd-fileutils.parser":37,"underscore":39}],2:[function(require,module,exports){
+},{"./lib/core/Abstraction":3,"./lib/core/Patch":5,"./lib/core/PdObject":6,"./lib/core/errors":7,"./lib/core/interfaces":8,"./lib/core/mixins":9,"./lib/global":12,"./lib/index":14,"./lib/js-dsp/interfaces":17,"./lib/js-dsp/portlets":18,"pd-fileutils.parser":37,"underscore":39}],2:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -2719,11 +2719,258 @@ var _ = require('underscore')
 exports.declareObjects = function(library) {
   require('./glue').declareObjects(library)
   require('./controls').declareObjects(library)
-  require('./js-dsp/dsp').declareObjects(library)
+  require('./js-dsp/dsp-objects').declareObjects(library)
   require('./js-dsp/portlets').declareObjects(library)
   require('./midi').declareObjects(library)
 }
-},{"./controls":2,"./glue":13,"./js-dsp/dsp":15,"./js-dsp/portlets":18,"./midi":20,"underscore":39}],15:[function(require,module,exports){
+},{"./controls":2,"./glue":13,"./js-dsp/dsp-objects":16,"./js-dsp/portlets":18,"./midi":20,"underscore":39}],15:[function(require,module,exports){
+/*
+ * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
+ *
+ *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
+ *
+ *  WebPd is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  WebPd is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+var _ = require('underscore')
+var utils = require('../core/utils')
+var corePortlets = require('../core/portlets')
+var PdObject = require('../core/PdObject')
+var pdGlob = require('../global')
+var vectors = require('./vectors')
+
+
+var Audio = exports.Audio = function(opts) {
+  this.channelCount = 2
+  this.blockSize = opts.blockSize || 4096
+  this.sampleRate = opts.sampleRate
+  if (opts.audioContext)
+    this.setContext(opts.audioContext)
+  this.stream = null
+
+  this.frame = 0
+  Object.defineProperty(this, 'time', {
+    get: function() { return this.frame / this.sampleRate * 1000 },
+  })
+
+  this._endPoints = []
+  this._buffers = []
+  for (ch = 0; ch < this.channelCount; ch++)
+    this._buffers.push(new Float32Array(this.blockSize))
+}
+
+Audio.prototype.start = function() {}
+Audio.prototype.stop = function() {}
+
+Audio.prototype.registerEndPoint = function(endPoint) {
+  this._endPoints.push(endPoint)
+}
+
+Audio.prototype.pushBuffer = function(ch, offset, buffer) {
+  this._buffers[ch].set(buffer, offset)
+}
+
+// Pulls a complete block in several steps, stopping each time
+// an event is scheduled
+Audio.prototype.tick = function() {
+  var blockEnd = this.frame + this.blockSize
+  var endPointsCount = this._endPoints.length
+  var offset = 0
+  var nextFrame, subBlockSize, i
+  while (this.frame !== blockEnd) {
+
+    // Pulls next sub-block
+    nextFrame = pdGlob.clock.tick(blockEnd)
+    subBlockSize = nextFrame - this.frame
+    if (subBlockSize) {
+      for (i = 0; i < endPointsCount; i++)
+        this._endPoints[i].tick(offset, subBlockSize)
+    }
+    offset += subBlockSize
+    this.frame = nextFrame
+  }
+}
+
+var _BufferMixin = {
+  getBuffer: function() {
+    return this._buffer.subarray(this._offset, this._offset + this._length)
+  },
+
+  setBufferRange: function(offset, length) {
+    this._offset = offset
+    this._length = length
+  }
+}
+
+var DspInlet = exports.DspInlet = corePortlets.Inlet.extend(_BufferMixin, {
+
+  init: function() {
+    this.frame = -1
+    this.dspSources = []
+  },
+
+  start: function() {
+    this.setBufferRange(0, pdGlob.audio.blockSize)
+    this._updateTickMethod()
+  },
+
+  connection: function() {
+    this._updateTickMethod()
+  },
+
+  disconnection: function() {
+    this._updateTickMethod()
+  },
+
+  tick: function(offset, length) {
+    if (this.frame !== pdGlob.audio.frame) {
+      this.setBufferRange(offset, length)
+      this._runTick()
+      this.frame = pdGlob.audio.frame
+    }
+  },
+
+  _tickNoSource: function() {},
+
+  // In case only one source, we reference directly its output buffer to avoid 
+  // copies / allocations as much as possible
+  _tickOneSource: function() {
+    this.dspSources[0].obj.tick(this._offset, this._length)
+    this._buffer = this.dspSources[0]._buffer
+  },
+
+  // In case several sources, we have to compute their sum
+  _tickSeveralSources: function() {
+    var sourceCount = this.dspSources.length
+    for (i = 0; i < sourceCount; i++) 
+      this.dspSources[i].obj.tick(this._offset, this._length) 
+    vectors.add(this.getBuffer(), 
+      _.map(this.dspSources, function(source) { return source.getBuffer () }))
+  },
+
+  _updateTickMethod: function() {
+    this.dspSources = this.connections.filter(function(source) { return source instanceof DspOutlet })
+    
+    // If several sources, we need to allocate a new buffer for computing the sum. 
+    if (this.dspSources.length > 1) {
+      this._buffer = new Float32Array(pdGlob.audio.blockSize)
+      this._runTick = this._tickSeveralSources
+    } else if (this.dspSources.length === 1)
+      this._runTick = this._tickOneSource
+    else if (this.dspSources.length === 0) {
+      this._buffer = new Float32Array(pdGlob.audio.blockSize)
+      this._runTick = this._tickNoSource
+    }
+  }
+
+})
+
+
+var DspOutlet = exports.DspOutlet = corePortlets.Outlet.extend(_BufferMixin, {
+
+  start: function() {
+    this._buffer = new Float32Array(pdGlob.audio.blockSize)
+    this.setBufferRange(0, this._buffer.length)
+  }
+
+})
+
+
+var DspObject = exports.DspObject = PdObject.extend({
+
+  init: function() {
+    this.frame = -1
+  },
+
+  tick: function(offset, length) {
+    if (this.frame !== pdGlob.audio.frame) {
+      var portlet, i, portletCount
+
+      // Run tick upstream on all inlets
+      for (i = 0, portletCount = this.inlets.length; i < portletCount; i++) {
+        portlet = this.inlets[i]
+        if (portlet instanceof DspInlet) 
+          portlet.tick(offset, length)
+      }
+
+      // Set the right buffer range for all outlets
+      for (i = 0, portletCount = this.outlets.length; i < portletCount; i++) {
+        portlet = this.outlets[i]
+        if (portlet instanceof DspOutlet) 
+          portlet.setBufferRange(offset, length)
+      }
+      this._runTick()
+      this.frame = pdGlob.audio.frame
+    } 
+  }
+
+})
+
+
+// Scheduler to handle timing
+var Clock = exports.Clock = function() {
+  this._events = []
+} 
+
+Clock.prototype.schedule = function(func, time, repetition) {
+  return this._insertEvent({ 
+    func: func, 
+    frame: time * pdGlob.audio.sampleRate / 1000, 
+    repetition: repetition ? repetition * pdGlob.audio.sampleRate / 1000 : null
+  })
+}
+
+Clock.prototype.unschedule = function(event) {
+  this._events = _.without(this._events, event)
+}
+
+Clock.prototype.tick = function(blockEnd) {
+  var frame = pdGlob.audio.frame
+
+  // Remove outdated events
+  while (this._events.length && this._events[0].frame < frame) {
+    this._events.shift()
+    console.error('outdated event discarded')
+  }
+
+  // Execute events that are scheduled for the current frame
+  while (this._events.length && Math.floor(this._events[0].frame) === frame) {
+    var event = this._events[0]
+    event.timeTag = event.frame / pdGlob.audio.sampleRate * 1000
+    event.func(event)
+    if (event.repetition && this._events.indexOf(event) !== -1) {
+      event.frame = event.frame + event.repetition
+      this._insertEvent(event)
+    } else {
+      this._events = _.without(this._events, event)
+    }
+  }
+
+  if (this._events.length)
+    return Math.floor(Math.min(this._events[0].frame, blockEnd))
+  else
+    return blockEnd
+}
+
+Clock.prototype._insertEvent = function(event) {
+  var ind = _.sortedIndex(this._events, event, 'frame')
+  this._events.splice(ind, 0, event)
+  return event
+}
+
+},{"../core/PdObject":6,"../core/portlets":10,"../core/utils":11,"../global":12,"./vectors":19,"underscore":39}],16:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -2749,36 +2996,13 @@ var _ = require('underscore')
   , PdObject = require('../core/PdObject')
   , pdGlob = require('../global')
   , portlets = require('./portlets')
-  , mixins = require('./mixins')
   , vectors = require('./vectors')
+  , engine = require('./dsp-engine')
 
-
-var DspObject = exports.DspObject = PdObject.extend(mixins.TickMixin, {
-
-  init: function() {
-    mixins.TickMixin.init.apply(this, arguments)
-  },
-
-  tick: function() {
-    if (this.frame !== pdGlob.audio.frame) {
-      var inlet, i, inletCount = this.inlets.length
-      for (i = 0; i < inletCount; i++) {
-        inlet = this.inlets[i]
-        if (inlet instanceof portlets.DspInlet) 
-          inlet.tick()
-      }
-      this._runTick()
-      this.frame = pdGlob.audio.frame
-    } 
-  }
-
-})
-
-
-var DspEndPoint = DspObject.extend({
+var DspEndPoint = engine.DspObject.extend({
 
   start: function() {
-    DspObject.prototype.start.apply(this)
+    engine.DspObject.prototype.start.apply(this)
     pdGlob.audio.registerEndPoint(this)
   }
 
@@ -2801,7 +3025,7 @@ var VarOrConstantDspInlet = portlets.DspInlet.extend({
 })
 
 
-var VarOrConstantDspObject = DspObject.extend({
+var VarOrConstantDspObject = engine.DspObject.extend({
 
   _updateRunTick: function(inletId) {
     if (this.inlets[inletId].dspSources.length)
@@ -2857,12 +3081,12 @@ var OscDspObject = exports.OscDspObject = VarOrConstantDspObject.extend({
 
   // Calculates the cos taking the frequency from dsp inlet
   _runTickVariable: function() {
-    this.phase = this._opVariable(this.outlets[0].buffer, this.phase, this.J, this.inlets[0].buffer)
+    this.phase = this._opVariable(this.outlets[0].getBuffer(), this.phase, this.J, this.inlets[0].getBuffer())
   },
 
   // Calculates the cos with a constant frequency from first inlet
   _runTickConstant: function() {
-    this.phase = this._opConstant(this.outlets[0].buffer, this.phase, this.K)
+    this.phase = this._opConstant(this.outlets[0].getBuffer(), this.phase, this.K)
   }
 
 })
@@ -2889,11 +3113,11 @@ var ArithmDspObject = exports.ArithmDspObject = VarOrConstantDspObject.extend({
   },
 
   _runTickVariable: function() {
-    this._opVariable(this.outlets[0].buffer, [ this.inlets[0].buffer, this.inlets[1].buffer ])
+    this._opVariable(this.outlets[0].getBuffer(), [ this.inlets[0].getBuffer(), this.inlets[1].getBuffer() ])
   },
 
   _runTickConstant: function() {
-    this._opConstant(this.outlets[0].buffer, this.inlets[0].buffer, this.val)
+    this._opConstant(this.outlets[0].getBuffer(), this.inlets[0].getBuffer(), this.val)
   }
 })
 
@@ -2905,10 +3129,15 @@ exports.declareObjects = function(library) {
     type: 'dac~',
     inletDefs: [portlets.DspInlet, portlets.DspInlet],
 
+    tick: function(offset, length) {
+      this._offset = offset
+      DspEndPoint.prototype.tick.apply(this, arguments)
+    },
+
     _runTick: function() {
       var ch, channelCount = this.inlets.length
       for (ch = 0; ch < channelCount; ch++)
-        pdGlob.audio.pushBuffer(ch, this.inlets[ch].buffer)
+        pdGlob.audio.pushBuffer(ch, this._offset, this.inlets[ch].getBuffer())
     }
 
   })
@@ -2961,12 +3190,12 @@ exports.declareObjects = function(library) {
     _opConstant: vectors.subConstant
   })
 
-  library['noise~'] = DspObject.extend({
+  library['noise~'] = engine.DspObject.extend({
     outletDefs: [ portlets.DspOutlet ],
-    _runTick: function() { vectors.random(this.outlets[0].buffer, -1, 1) }
+    _runTick: function() { vectors.random(this.outlets[0].getBuffer(), -1, 1) }
   })
 
-  library['sig~'] = DspObject.extend({
+  library['sig~'] = engine.DspObject.extend({
     inletDefs: [ 
       portlets.Inlet.extend({
         message: function(args) {
@@ -2975,11 +3204,57 @@ exports.declareObjects = function(library) {
       }) 
     ],
     outletDefs: [ portlets.DspOutlet ],
-    _runTick: function() { vectors.random(this.outlets[0].buffer, -1, 1) }
+    init: function(args) {
+      engine.DspObject.prototype.init.apply(this, arguments)
+      this.setVal(args[0])
+    },
+    setVal: function(val) { this.val = val },
+    _runTick: function() { vectors.constant(this.outlets[0].getBuffer(), this.val) }
   })
 
+  library['line~'] = engine.DspObject.extend({
 
-  library['line~'] = null
+    inletTypes: [
+      portlets.Inlet.extend({
+        message: function(args) {
+          var y1 = args[0]
+          var duration = args[1]
+          if (duration !== undefined)
+            this.obj.toDspLine(y1, duration)
+          else
+            this.obj.toDspConst(y1)
+        }
+      })
+    ],
+    outletTypes: [ portlets.DspOutlet ],
+
+    init: function() {
+      this.value = 0
+      this.toDspConst()
+    },
+
+    _runTickConstant: function() {
+      vectors.constant(this.outlets[0].getBuffer(), this.value)
+    },
+
+    _runTickVariable: function() {
+      this.value = vectors.ramp(this.outlets[0].getBuffer(), this.value, this.slope)
+    },
+
+    toDspConst: function() {
+      this.dspTick = this.dspTickConst
+    },
+
+    toDspLine: function(val, duration) {
+      this.slope = (val - this.value) / (duration * this.patch.sampleRate / 1000)
+      this.dspTick = this.dspTickLine
+
+          this.toDspConst()
+          this.emit('end')
+
+    }
+  })
+
   library['lop~'] = null
   library['hip~'] = null
   library['bp~'] = null
@@ -2990,7 +3265,7 @@ exports.declareObjects = function(library) {
   library['clip~'] = null
   library['adc~'] = null
 }
-},{"../core/PdObject":6,"../core/utils":11,"../global":12,"./mixins":17,"./portlets":18,"./vectors":19,"underscore":39}],16:[function(require,module,exports){
+},{"../core/PdObject":6,"../core/utils":11,"../global":12,"./dsp-engine":15,"./portlets":18,"./vectors":19,"underscore":39}],17:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -3012,58 +3287,11 @@ exports.declareObjects = function(library) {
  */
  
 var _ = require('underscore')
-  , getUserMedia = require('getusermedia')
-  , pdGlob = require('../global')
+var getUserMedia = require('getusermedia')
+var pdGlob = require('../global')
+var Audio = exports.Audio = require('./dsp-engine').Audio
+var Clock = exports.Clock = require('./dsp-engine').Clock
 
-
-var Audio = exports.Audio = function(opts) {
-  this.channelCount = 2
-  this.blockSize = opts.blockSize || 4096
-  this.sampleRate = opts.sampleRate
-  if (opts.audioContext)
-    this.setContext(opts.audioContext)
-  this.stream = null
-
-  this.frame = 0
-  Object.defineProperty(this, 'time', {
-    get: function() { return this.frame / this.sampleRate * 1000 },
-  })
-
-  this._endPoints = []
-  this._buffers = []
-  for (ch = 0; ch < this.channelCount; ch++)
-    this._buffers.push(new Float32Array(this.blockSize))
-}
-
-Audio.prototype.start = function() {}
-Audio.prototype.stop = function() {}
-
-Audio.prototype.registerEndPoint = function(endPoint) {
-  this._endPoints.push(endPoint)
-}
-
-Audio.prototype.pushBuffer = function(ch, buffer) {
-  this._buffers[ch] = buffer
-}
-
-Audio.prototype.tick = function() {
-  var blockEnd = this.frame + this.blockSize
-  var endPointsCount = this._endPoints.length
-  var offset = 0
-  var nextFrame, subBlockSize, i
-  while (this.frame !== blockEnd) {
-    nextFrame = pdGlob.clock.tick(blockEnd)
-
-    subBlockSize = nextFrame - this.frame
-    if (subBlockSize) {
-      for (i = 0; i < endPointsCount; i++) {
-        this._endPoints[i].tick(subBlockSize, offset)
-      }
-    }
-    offset += subBlockSize
-    this.frame = nextFrame
-  }
-}
 
 Audio.prototype.setContext = function(context) {
   var self = this
@@ -3121,58 +3349,6 @@ Audio.prototype.getUserMedia = function(done) {
 }
 
 
-// Scheduler to handle timing
-var Clock = exports.Clock = function() {
-  this._events = []
-} 
-
-Clock.prototype.schedule = function(func, time, repetition) {
-  return this._insertEvent({ 
-    func: func, 
-    frame: time * pdGlob.audio.sampleRate / 1000, 
-    repetition: repetition ? repetition * pdGlob.audio.sampleRate / 1000 : null
-  })
-}
-
-Clock.prototype.unschedule = function(event) {
-  this._events = _.without(this._events, event)
-}
-
-Clock.prototype.tick = function(blockEnd) {
-  var frame = pdGlob.audio.frame
-
-  // Remove outdated events
-  while (this._events.length && this._events[0].frame < frame) {
-    this._events.shift()
-    console.error('outdated event discarded')
-  }
-
-  // Execute events that are scheduled for the current frame
-  while (this._events.length && Math.floor(this._events[0].frame) === frame) {
-    var event = this._events[0]
-    event.timeTag = event.frame / pdGlob.audio.sampleRate * 1000
-    event.func(event)
-    if (event.repetition && this._events.indexOf(event) !== -1) {
-      event.frame = event.frame + event.repetition
-      this._insertEvent(event)
-    } else {
-      this._events = _.without(this._events, event)
-    }
-  }
-
-  if (this._events.length)
-    return Math.floor(Math.min(this._events[0].frame, blockEnd))
-  else
-    return blockEnd
-}
-
-Clock.prototype._insertEvent = function(event) {
-  var ind = _.sortedIndex(this._events, event, 'frame')
-  this._events.splice(ind, 0, event)
-  return event
-}
-
-
 var Midi = exports.Midi = function() {
   this._midiInput = null
   this._callback = function() {}
@@ -3220,7 +3396,7 @@ WebStorage.prototype.get = function(url, done) {
   req.responseType = 'arraybuffer'
   req.send()
 }
-},{"../global":12,"getusermedia":27,"underscore":39}],17:[function(require,module,exports){
+},{"../global":12,"./dsp-engine":15,"getusermedia":27,"underscore":39}],18:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -3241,119 +3417,12 @@ WebStorage.prototype.get = function(url, done) {
  *
  */
 
-var pdGlob = require('../global')
+var corePortlets = require('../core/portlets')
+var engine = require('./dsp-engine')
 
-exports.TickMixin = {
-
-  init: function() {
-    this.frame = -1
-  },
-
-  tick: function() {
-    if (this.frame !== pdGlob.audio.frame) {
-      this._runTick()
-      this.frame = pdGlob.audio.frame
-    }
-  },
-
-  _runTick: function() {
-    throw new Error('not implemented')
-  }
-
-}
-},{"../global":12}],18:[function(require,module,exports){
-/*
- * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
- *
- *  This file is part of WebPd. See https://github.com/sebpiq/WebPd for documentation
- *
- *  WebPd is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  WebPd is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with WebPd.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
-var _ = require('underscore')
-  , utils = require('../core/utils')
-  , corePortlets = require('../core/portlets')
-  , PdObject = require('../core/PdObject')
-  , pdGlob = require('../global')
-  , mixins = require('./mixins')
-  , vectors = require('./vectors')
-
-
-var DspInlet = exports.DspInlet = corePortlets.Inlet.extend(mixins.TickMixin, {
-
-  init: function() {
-    mixins.TickMixin.init.apply(this, arguments)
-    this.dspSources = []
-  },
-
-  start: function() {
-    this._updateTickMethod()
-  },
-
-  connection: function() {
-    this._updateTickMethod()
-  },
-
-  disconnection: function() {
-    this._updateTickMethod()
-  },
-
-  // In case only one source, we reference directly its output buffer to avoid 
-  // copies / allocations as much as possible
-  _tickOneSource: function() {
-    this.dspSources[0].obj.tick()
-    this.buffer = this.dspSources[0].buffer
-  },
-
-  // In case several sources, we have to compute their sum
-  _tickSeveralSources: function() {
-    var sourceCount = this.dspSources.length
-    for (i = 0; i < sourceCount; i++) 
-      this.dspSources[i].obj.tick() 
-    vectors.add(this.buffer, _.pluck(this.dspSources, 'buffer'))
-  },
-
-  _tickNoSource: function() {},
-
-  _updateTickMethod: function() {
-    this.dspSources = this.connections.filter(function(source) { return source instanceof DspOutlet })
-    
-    // If several sources, we need to allocate a new buffer for computing the sum. 
-    if (this.dspSources.length > 1) {
-      this.buffer = new Float32Array(pdGlob.audio.blockSize)
-      this._runTick = this._tickSeveralSources
-    } else if (this.dspSources.length === 1)
-      this._runTick = this._tickOneSource
-    else if (this.dspSources.length === 0) {
-      this.buffer = new Float32Array(pdGlob.audio.blockSize)
-      this._runTick = this._tickNoSource
-    }
-  }
-
-})
-
-
-var DspOutlet = exports.DspOutlet = corePortlets.Outlet.extend({
-
-  start: function() {
-    this.buffer = new Float32Array(pdGlob.audio.blockSize)
-  }
-})
-
+exports.DspInlet = engine.DspInlet
+exports.DspOutlet = engine.DspOutlet
 exports.Inlet = corePortlets.Inlet
-
 exports.Outlet = corePortlets.Outlet
 
 exports.declareObjects = function(library) {
@@ -3362,7 +3431,7 @@ exports.declareObjects = function(library) {
   library['inlet'] = function() {}
   library['inlet~'] = function() {}
 }
-},{"../core/PdObject":6,"../core/portlets":10,"../core/utils":11,"../global":12,"./mixins":17,"./vectors":19,"underscore":39}],19:[function(require,module,exports){
+},{"../core/portlets":10,"./dsp-engine":15}],19:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -3611,6 +3680,16 @@ exports.constant = function(destination, val) {
   var length = destination.length
   for (i = 0; i < length; i++)
     destination[i] = val
+}
+
+exports.ramp = function(destination, value, step) {
+  var i
+  var length = destination.length
+  for (i = 0; i < length; i++) {
+    value += step
+    destination[i] = value
+  }
+  return value
 }
 },{}],20:[function(require,module,exports){
 /*
