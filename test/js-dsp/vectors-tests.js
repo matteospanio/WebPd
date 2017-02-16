@@ -262,4 +262,66 @@ describe('js-dsp.vectors', function() {
 
   })
 
+  describe('circularBufferWrite', function() {
+
+    it('should write to given offset if source is small enough', function() {
+      var offset
+      var destination = new Float32Array([ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ])
+      var source = new Float32Array([ 0.1, 0.2, 0.3, 0.4 ])  
+      offset = vectors.circularBufferWrite(destination, source, 3)
+      assert.deepEqual(destination, new Float32Array([ 1, 2, 3, 0.1, 0.2, 0.3, 0.4, 8, 9, 10 ]))
+      assert.equal(offset, 7)
+    })
+
+    it('should start writing at offset and write circularly if source too big', function() {
+      var destination, source, offset
+      
+      // Over the end, back to start
+      destination = new Float32Array([ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ])
+      source = new Float32Array([ 0.1, 0.2, 0.3, 0.4 ])
+      offset = vectors.circularBufferWrite(destination, source, 8)
+      assert.deepEqual(destination, new Float32Array([ 0.3, 0.4, 3, 4, 5, 6, 7, 8, 0.1, 0.2 ]))
+      assert.equal(offset, 2)
+
+      // Looping several times
+      destination = new Float32Array([ 1, 2, 3, 4, 5 ])
+      source = new Float32Array([ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6 ])
+      offset = vectors.circularBufferWrite(destination, source, 2)
+      assert.deepEqual(destination, new Float32Array([ 0.4, 0.5, 0.6, 0.2, 0.3 ]))
+      assert.equal(offset, 3)
+    })
+
+  })
+
+  describe('circularBufferRead', function() {
+
+    it('should read from given offset if source is small enough', function() {
+      var offset
+      var destination = new Float32Array([ 1, 2, 3, 4 ])
+      var source = new Float32Array([ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 ])
+      offset = vectors.circularBufferRead(destination, source, 2)
+      assert.deepEqual(destination, new Float32Array([ 0.3, 0.4, 0.5, 0.6 ]))
+      assert.equal(offset, 6)
+    })
+
+    it('should start reading at offset and read circularly if destination too big', function() {
+      var destination, source, offset
+      
+      // Over the end, back to start
+      destination = new Float32Array([ 1, 2, 3, 4 ])
+      source = new Float32Array([ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8 ])
+      offset = vectors.circularBufferRead(destination, source, 6)
+      assert.deepEqual(destination, new Float32Array([ 0.7, 0.8, 0.1, 0.2 ]))
+      assert.equal(offset, 2)
+
+      // Looping several times
+      destination = new Float32Array([ 1, 2, 3, 4, 5, 6, 7, 8, 9 ])
+      source = new Float32Array([ 0.1, 0.2, 0.3, 0.4 ])
+      offset = vectors.circularBufferRead(destination, source, 2)
+      assert.deepEqual(destination, new Float32Array([ 0.3, 0.4, 0.1, 0.2, 0.3, 0.4, 0.1, 0.2, 0.3 ]))
+      assert.equal(offset, 3)
+    })
+
+  })
+
 })

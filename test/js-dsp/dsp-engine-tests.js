@@ -203,6 +203,16 @@ describe('js-dsp.dsp-engine', function() {
 
   describe('Audio', function() {
 
+    it('should insert enpoints in the right order', function() {
+      var endPoint1 = { endPointPriority: 1 }
+      var endPoint2 = { endPointPriority: 2 }
+      var endPoint3 = { endPointPriority: 0 }
+      audio.registerEndPoint(endPoint1)
+      audio.registerEndPoint(endPoint2)
+      audio.registerEndPoint(endPoint3)
+      assert.deepEqual(audio._endPoints, [ endPoint2, endPoint1, endPoint3 ])
+    })
+
     it('should generate blocks and take into account scheduled events', function() {
       var fakeEndPoint = {
         tick: function() { this.ticked.push(_.toArray(arguments)) },

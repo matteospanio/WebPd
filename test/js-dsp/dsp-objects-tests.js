@@ -180,16 +180,14 @@ describe('js-dsp.dsp-objects', function() {
 
       nextBlockSize = clock.tick(audio.frame + audio.blockSize)
       line.tick(0, nextBlockSize)
-      helpers.assertAboutEqual(line.o(0).getBuffer(), 
-        new Float32Array([ 1.1, 1.2, 1.3, 1.4, 1.5 ]))
+      helpers.assertAboutEqual(line.o(0).getBuffer(), new Float32Array([ 1.1, 1.2, 1.3, 1.4, 1.5 ]))
       audio.frame += nextBlockSize
 
       // We interrupt the previous ramp with a new one
       line.i(0).message([ 1, 250 ])
       nextBlockSize = clock.tick(audio.frame + audio.blockSize)
       line.tick(0, nextBlockSize)
-      helpers.assertAboutEqual(line.o(0).getBuffer(), 
-        new Float32Array([ 1.3, 1.1 ]))
+      helpers.assertAboutEqual(line.o(0).getBuffer(), new Float32Array([ 1.3, 1.1 ]))
       audio.frame += nextBlockSize
 
       // This should trigger the end of line event and go back to constant
@@ -197,13 +195,11 @@ describe('js-dsp.dsp-objects', function() {
       assert.equal(clock._events.length, 0)
 
       line.tick(0, nextBlockSize)
-      helpers.assertAboutEqual(line.o(0).getBuffer(), 
-        new Float32Array([ 1, 1, 1, 1, 1 ]))
+      helpers.assertAboutEqual(line.o(0).getBuffer(), new Float32Array([ 1, 1, 1, 1, 1 ]))
       audio.frame += nextBlockSize
     })
 
   })
-
 
   describe('tabread~', function() {
 
@@ -238,6 +234,75 @@ describe('js-dsp.dsp-objects', function() {
       indices.nextBuffer = new Float32Array([ 1.5, 2, 3, 4 ])
       tabread.i(0).message([ 'set', 'blo' ])
       assert.equal(tabread.array.resolved, array)
+    })
+
+  })
+
+  describe('delwrite~/delread~', function() {
+
+    it('should read with the appropriate delay', function() {
+      audio.sampleRate = 10
+      audio.blockSize = 5
+      var source = patch.createObject('DummySourceObject')
+      var delread1 = patch.createObject('delread~', [ 'bla', 500 ])
+      var delwrite = patch.createObject('delwrite~', [ 'bla', 1000 ])
+      var delread2 = patch.createObject('delread~', [ 'bla', 200 ])
+      var delread3 = patch.createObject('delread~', [ 'blo', 200 ])
+      source.o(0).connect(delwrite.i(0))
+
+      source.nextBuffer = new Float32Array([ 1, 2, 3, 4, 5 ])
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      delwrite.tick(0, nextBlockSize)
+      delread1.tick(0, nextBlockSize)
+      delread2.tick(0, nextBlockSize)
+      delread3.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(delread1.o(0).getBuffer(), new Float32Array([ 0, 0, 0, 0, 0 ]))
+      helpers.assertAboutEqual(delread2.o(0).getBuffer(), new Float32Array([ 0, 0, 1, 2, 3 ]))
+      helpers.assertAboutEqual(delread3.o(0).getBuffer(), new Float32Array([ 0, 0, 0, 0, 0 ]))
+      audio.frame += nextBlockSize
+
+      source.nextBuffer = new Float32Array([ 6, 7, 8, 9, 10 ])
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      delwrite.tick(0, nextBlockSize)
+      delread1.tick(0, nextBlockSize)
+      delread2.tick(0, nextBlockSize)
+      delread3.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(delread1.o(0).getBuffer(), new Float32Array([ 1, 2, 3, 4, 5 ]))
+      helpers.assertAboutEqual(delread2.o(0).getBuffer(), new Float32Array([ 4, 5, 6, 7, 8 ]))
+      helpers.assertAboutEqual(delread3.o(0).getBuffer(), new Float32Array([ 0, 0, 0, 0, 0 ]))
+      audio.frame += nextBlockSize
+    })
+
+    it('should work changing the delay time', function() {
+      audio.sampleRate = 10
+      audio.blockSize = 5
+      var source = patch.createObject('DummySourceObject')
+      var delread = patch.createObject('delread~', [ 'bla', 200 ])
+      var delwrite = patch.createObject('delwrite~', [ 'bla', 1000 ])
+      source.o(0).connect(delwrite.i(0))
+
+      source.nextBuffer = new Float32Array([ 1, 2, 3, 4, 5 ])
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      delwrite.tick(0, nextBlockSize)
+      delread.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(delread.o(0).getBuffer(), new Float32Array([ 0, 0, 1, 2, 3 ]))
+      audio.frame += nextBlockSize
+
+      source.nextBuffer = new Float32Array([ 6, 7, 8, 9, 10 ])
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      delread.i(0).message([ 500 ])
+      delwrite.tick(0, nextBlockSize)
+      delread.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(delread.o(0).getBuffer(), new Float32Array([ 1, 2, 3, 4, 5 ]))
+      audio.frame += nextBlockSize
+
+      source.nextBuffer = new Float32Array([ 11, 12, 13, 14, 15 ])
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      delread.i(0).message([ 100 ])
+      delwrite.tick(0, nextBlockSize)
+      delread.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(delread.o(0).getBuffer(), new Float32Array([ 10, 11, 12, 13, 14 ]))
+      audio.frame += nextBlockSize
     })
 
   })

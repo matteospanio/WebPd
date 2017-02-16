@@ -2774,8 +2774,10 @@ var Audio = exports.Audio = function(opts) {
 Audio.prototype.start = function() {}
 Audio.prototype.stop = function() {}
 
-Audio.prototype.registerEndPoint = function(endPoint) {
+Audio.prototype.registerEndPoint = function(endPoint, endPointPriority) {
   this._endPoints.push(endPoint)
+  this._endPoints = _.sortBy(this._endPoints, 
+    function(endPoint) { return - endPoint.endPointPriority })
 }
 
 Audio.prototype.pushBuffer = function(ch, offset, buffer) {
@@ -2801,6 +2803,63 @@ Audio.prototype.tick = function() {
     this.frame += subBlockSize
   }
 }
+
+
+// Scheduler to handle timing
+var Clock = exports.Clock = function() {
+  this._events = []
+} 
+
+Clock.prototype.schedule = function(func, time, repetition) {
+  return this._insertEvent({ 
+    func: func, 
+    frame: time * pdGlob.audio.sampleRate / 1000, 
+    repetition: repetition ? repetition * pdGlob.audio.sampleRate / 1000 : null
+  })
+}
+
+Clock.prototype.unschedule = function(event) {
+  this._events = _.without(this._events, event)
+}
+
+// Executes the events scheduled for the current frame, and returns
+// the number of frames to reach next event or `blockEndFrame` if there are
+// no events in the current block.
+Clock.prototype.tick = function(blockEndFrame) {
+  var frame = pdGlob.audio.frame
+
+  // Remove outdated events
+  while (this._events.length && this._events[0].frame < frame) {
+    console.error('outdated event discarded', pdGlob.audio.frame, this._events.shift())
+  }
+
+  // Execute events that are scheduled for the current frame
+  while (this._events.length && Math.floor(this._events[0].frame) === frame) {
+    var event = this._events[0]
+    event.timeTag = event.frame / pdGlob.audio.sampleRate * 1000
+    event.func(event)
+    // If `event` is not in the list anymore, it means the callback has unscheduled
+    // it, therefore we shouldn't reschedule.
+    if (event.repetition && this._events.indexOf(event) !== -1) {
+      event.frame = event.frame + event.repetition
+      this._events = _.without(this._events, event)
+      this._insertEvent(event)
+    } else 
+      this._events = _.without(this._events, event)
+  }
+
+  if (this._events.length)
+    return Math.floor(Math.min(this._events[0].frame, blockEndFrame)) - frame
+  else
+    return blockEndFrame - frame
+}
+
+Clock.prototype._insertEvent = function(event) {
+  var ind = _.sortedIndex(this._events, event, 'frame')
+  this._events.splice(ind, 0, event)
+  return event
+}
+
 
 var _BufferMixin = {
   getBuffer: function() {
@@ -2918,61 +2977,17 @@ var DspObject = exports.DspObject = PdObject.extend({
 })
 
 
-// Scheduler to handle timing
-var Clock = exports.Clock = function() {
-  this._events = []
-} 
+var DspEndPoint = exports.DspEndPoint = DspObject.extend({
 
-Clock.prototype.schedule = function(func, time, repetition) {
-  return this._insertEvent({ 
-    func: func, 
-    frame: time * pdGlob.audio.sampleRate / 1000, 
-    repetition: repetition ? repetition * pdGlob.audio.sampleRate / 1000 : null
-  })
-}
+  // End points with higher priorities are ran first
+  endPointPriority: null,
 
-Clock.prototype.unschedule = function(event) {
-  this._events = _.without(this._events, event)
-}
-
-// Executes the events scheduled for the current frame, and returns
-// the number of frames to reach next event or `blockEndFrame` if there are
-// no events in the current block.
-Clock.prototype.tick = function(blockEndFrame) {
-  var frame = pdGlob.audio.frame
-
-  // Remove outdated events
-  while (this._events.length && this._events[0].frame < frame) {
-    console.error('outdated event discarded', pdGlob.audio.frame, this._events.shift())
+  start: function() {
+    DspObject.prototype.start.apply(this)
+    pdGlob.audio.registerEndPoint(this, this.endPointPriority)
   }
 
-  // Execute events that are scheduled for the current frame
-  while (this._events.length && Math.floor(this._events[0].frame) === frame) {
-    var event = this._events[0]
-    event.timeTag = event.frame / pdGlob.audio.sampleRate * 1000
-    event.func(event)
-    // If `event` is not in the list anymore, it means the callback has unscheduled
-    // it, therefore we shouldn't reschedule.
-    if (event.repetition && this._events.indexOf(event) !== -1) {
-      event.frame = event.frame + event.repetition
-      this._events = _.without(this._events, event)
-      this._insertEvent(event)
-    } else 
-      this._events = _.without(this._events, event)
-  }
-
-  if (this._events.length)
-    return Math.floor(Math.min(this._events[0].frame, blockEndFrame)) - frame
-  else
-    return blockEndFrame - frame
-}
-
-Clock.prototype._insertEvent = function(event) {
-  var ind = _.sortedIndex(this._events, event, 'frame')
-  this._events.splice(ind, 0, event)
-  return event
-}
-
+})
 },{"../core/PdObject":6,"../core/portlets":10,"../core/utils":11,"../global":12,"./vectors":19,"underscore":39}],16:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
@@ -3003,36 +3018,27 @@ var _ = require('underscore')
   , vectors = require('./vectors')
   , engine = require('./dsp-engine')
 
-var DspEndPoint = engine.DspObject.extend({
-
-  start: function() {
-    engine.DspObject.prototype.start.apply(this)
-    pdGlob.audio.registerEndPoint(this)
-  }
-
-})
-
 
 var VarOrConstantDspInlet = portlets.DspInlet.extend({
   start: function() {
     portlets.DspInlet.prototype.start.apply(this, arguments)
-    this.obj._updateRunTick(this.id)
+    this.obj._updateRunTick(this.id, this.dspSources.length)
   },
   connection: function() {
     portlets.DspInlet.prototype.connection.apply(this, arguments)
-    this.obj._updateRunTick(this.id)
+    this.obj._updateRunTick(this.id, this.dspSources.length)
   },
   disconnection: function() {
     portlets.DspInlet.prototype.disconnection.apply(this, arguments)
-    this.obj._updateRunTick(this.id)
+    this.obj._updateRunTick(this.id, this.dspSources.length)
   }
 })
 
 
 var VarOrConstantDspObject = engine.DspObject.extend({
 
-  _updateRunTick: function(inletId) {
-    if (this.inlets[inletId].dspSources.length)
+  _updateRunTick: function(inletId, dspSourceCount) {
+    if (dspSourceCount >= 1)
       this._runTick = this._runTickVariable
     else
       this._runTick = this._runTickConstant
@@ -3144,14 +3150,15 @@ var TabDspObject = engine.DspObject.extend({
 
 exports.declareObjects = function(library) {
 
-  library['dac~'] = DspEndPoint.extend({
+  library['dac~'] = engine.DspEndPoint.extend({
 
     type: 'dac~',
+    endPointPriority: 0,
     inletDefs: [portlets.DspInlet, portlets.DspInlet],
 
     tick: function(offset, length) {
       this._offset = offset
-      DspEndPoint.prototype.tick.apply(this, arguments)
+      engine.DspEndPoint.prototype.tick.apply(this, arguments)
     },
 
     _runTick: function() {
@@ -3291,7 +3298,7 @@ exports.declareObjects = function(library) {
     type: 'tabread~',
 
     inletDefs: [
-      portlets.DspInlet.extend({
+      VarOrConstantDspInlet.extend({
         
         message: function(args) {
           var method = args[0]
@@ -3299,16 +3306,6 @@ exports.declareObjects = function(library) {
             this.obj.array.set(args[1])
           else
             console.error('unknown method ' + method)
-        },
-
-        connection: function() {
-          portlets.DspInlet.prototype.connection.apply(this, arguments)
-          this.obj._updateRunTick()
-        },
-
-        disconnection: function() {
-          portlets.DspInlet.prototype.disconnection.apply(this, arguments)
-          this.obj._updateRunTick()
         }
 
       })
@@ -3331,8 +3328,8 @@ exports.declareObjects = function(library) {
       vectors.constant(this.o(0).getBuffer(), 0)
     },
 
-    _updateRunTick: function() {
-      if (this.i(0).dspSources.length && this.array.resolved)
+    _updateRunTick: function(inletId, dspSourceCount) {
+      if (dspSourceCount >= 1 && this.array.resolved)
         this._runTick = this._runTickInterpolate
       else
         this._runTick = this._runTickZeros
@@ -3340,9 +3337,111 @@ exports.declareObjects = function(library) {
 
   })
 
+  // Which order in Dsp? Before or after dac?
+  library['delwrite~'] = engine.DspEndPoint.extend(mixins.NamedMixin, mixins.EventEmitterMixin, {
 
-  library['delwrite~'] = null
-  library['delread~'] = null
+    type: 'delwrite~',
+    endPointPriority: 1,
+    nameIsUnique: true,
+
+    inletDefs: [ portlets.DspInlet ],
+
+    init: function(args) {
+      engine.DspEndPoint.prototype.init.apply(this, arguments)
+      var name = args[0]
+      this.delayLine = new Float32Array(args[1] || 1000)
+      this._position = 0
+      if (name) this.setName(name)
+    },
+
+    start: function() {
+      engine.DspEndPoint.prototype.start.apply(this, arguments)
+    },
+
+    destroy: function() {
+      engine.DspEndPoint.prototype.destroy.apply(this, arguments)
+      mixins.NamedMixin.destroy.apply(this, arguments)
+      mixins.EventEmitterMixin.destroy.apply(this, arguments)
+    },
+
+    getDelayedPosition: function(delayFrames) {
+      var delayedPosition = this._position - delayFrames
+      while (delayedPosition < 0)
+        delayedPosition += this.delayLine.length
+      return delayedPosition
+    },
+
+    _runTick: function() {
+      this._position = vectors.circularBufferWrite(this.delayLine, this.i(0).getBuffer(), this._position)
+    }
+
+  })
+
+  library['delread~'] = engine.DspObject.extend({
+
+    type: 'delread~',
+
+    inletDefs: [
+      portlets.Inlet.extend({
+        message: function(args) {
+          this.obj.setDelayTime(args[0])
+        }
+      })
+    ],
+    outletDefs: [ portlets.DspOutlet ],
+
+    init: function(args) {
+      engine.DspObject.prototype.init.apply(this, arguments)
+      var self = this
+      var delayName = args[0]
+      
+      this._delWrite = new mixins.Reference('delwrite~')
+      this._delWrite.on('changed', function() {
+        self._updateRunTick()
+        // Update the read position
+        if (self._delWrite.resolved)
+          self._position = self._delWrite.resolved.getDelayedPosition(self._delayFrames)
+      })
+
+      this._delayTime = args[1] || 0
+      if (delayName) 
+        this._delWrite.set(delayName)
+    },
+
+    start: function() {
+      engine.DspObject.prototype.start.apply(this, arguments)
+      this.setDelayTime(this._delayTime)
+    },
+
+    destroy: function() {
+      engine.DspObject.prototype.init.apply(this, arguments)
+      this._delWrite.destroy()
+    },
+
+    setDelayTime: function(delayTime) {
+      this._delayTime = delayTime
+      this._delayFrames = Math.round(pdGlob.audio.sampleRate * delayTime / 1000)
+      if (this._delWrite.resolved)
+        this._position = this._delWrite.resolved.getDelayedPosition(this._delayFrames)
+    },
+
+    _runTickZeros: function() {
+      vectors.constant(this.o(0).getBuffer(), 0)
+    },
+
+    _runTickReadDelay: function() {
+      this._position = vectors.circularBufferRead(
+        this.o(0).getBuffer(), this._delWrite.resolved.delayLine, this._position)
+    },
+
+    _updateRunTick: function() {
+      if (this._delWrite.resolved)
+        this._runTick = this._runTickReadDelay
+      else
+        this._runTick = this._runTickZeros
+    }
+
+  })
 
 
   library['lop~'] = null
@@ -3790,6 +3889,39 @@ exports.linearInterpolation = function(destination, values, indices) {
     y2 = values[Math.ceil(x)]
     destination[i] = y1 + (x - x1) * (y2 - y1)
   }
+}
+
+exports.circularBufferWrite = function(destination, source, offset) {
+  var destPos = offset
+  var sourcePos = 0
+  var writeSize = null
+  var sourceLength = source.length
+  var destLength = destination.length
+  while (sourcePos < sourceLength) {
+    writeSize = Math.min(
+      sourceLength - sourcePos,
+      Math.min(sourceLength, destLength - destPos)
+    )
+    destination.set(source.subarray(sourcePos, sourcePos + writeSize), destPos)
+    sourcePos += writeSize
+    destPos = (destPos + writeSize) % destLength
+  }
+  return destPos
+}
+
+exports.circularBufferRead = function(destination, source, offset) {
+  var destPos = 0
+  var sourcePos = offset
+  var readSize = null
+  var sourceLength = source.length
+  var destLength = destination.length
+  while (destPos < destLength) {
+    readSize = Math.min(destLength - destPos, sourceLength - sourcePos)
+    destination.set(source.subarray(sourcePos, sourcePos + readSize), destPos)
+    sourcePos = (sourcePos + readSize) % sourceLength
+    destPos += readSize
+  }
+  return sourcePos
 }
 },{}],20:[function(require,module,exports){
 /*
