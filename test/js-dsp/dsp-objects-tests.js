@@ -150,20 +150,56 @@ describe('js-dsp.dsp-objects', function() {
 
     it('should ramp to value when receiving number and duration', function() {
       var line = patch.createObject('line~')
-      var nextFrame
+      var nextBlockSize
       audio.sampleRate = 10
+      audio.blockSize = 10
 
       line.i(0).message([ 1 ])
       line.i(0).message([ 2, 1000 ])
 
-      audio.frame = clock.tick(audio.blockSize)
-      line.tick(0, audio.frame)
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      line.tick(0, nextBlockSize)
       helpers.assertAboutEqual(line.o(0).getBuffer(), 
         new Float32Array([ 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2 ]))
-      
-      audio.frame = clock.tick(audio.frame + audio.blockSize)
-      line.tick(0, 4)
-      helpers.assertAboutEqual(line.o(0).getBuffer(), [ 2, 2, 2, 2 ])
+      audio.frame += nextBlockSize
+            
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      line.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(line.o(0).getBuffer(), [ 2, 2, 2, 2, 2, 2, 2, 2, 2, 2 ])
+      audio.frame += nextBlockSize
+    })
+
+    it('should work when interrupting a ramp', function() {
+      var line = patch.createObject('line~')
+      var nextBlockSize
+      audio.sampleRate = 10
+      audio.blockSize = 5
+
+      line.i(0).message([ 1 ])
+      line.i(0).message([ 2, 1000 ])
+
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      line.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(line.o(0).getBuffer(), 
+        new Float32Array([ 1.1, 1.2, 1.3, 1.4, 1.5 ]))
+      audio.frame += nextBlockSize
+
+      // We interrupt the previous ramp with a new one
+      line.i(0).message([ 1, 250 ])
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      line.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(line.o(0).getBuffer(), 
+        new Float32Array([ 1.3, 1.1 ]))
+      audio.frame += nextBlockSize
+
+      // This should trigger the end of line event and go back to constant
+      nextBlockSize = clock.tick(audio.frame + audio.blockSize)
+      assert.equal(clock._events.length, 0)
+
+      line.tick(0, nextBlockSize)
+      helpers.assertAboutEqual(line.o(0).getBuffer(), 
+        new Float32Array([ 1, 1, 1, 1, 1 ]))
+      audio.frame += nextBlockSize
     })
 
   })

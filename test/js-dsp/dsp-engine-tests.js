@@ -23,12 +23,12 @@ describe('js-dsp.dsp-engine', function() {
 
       // block 0
       blockEnd = audio.frame + audio.blockSize
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, audio.blockSize)
 
       // block 1
       blockEnd = audio.frame + audio.blockSize
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, audio.blockSize * 2)
     })
 
@@ -50,26 +50,26 @@ describe('js-dsp.dsp-engine', function() {
       // event 1 at 0.95, so tick advances of 0.05 seconds, 
       audio.frame = 0.9 * audio.sampleRate
       blockEnd = audio.frame + audio.blockSize
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.95 * audio.sampleRate))
       assert.deepEqual(called, [])
       // next tick event called and advances of the remaining 0.05 seconds to make a complete block 
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, blockEnd)
       assert.deepEqual(called, ['event1'])
 
       // Same idea, but since there are 2 events this time, the block is cut in 3
       audio.frame = 1.9 * audio.sampleRate
       blockEnd = 2.0 * audio.sampleRate
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(1.95 * audio.sampleRate))
       assert.deepEqual(called, ['event1'])
 
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(1.975 * audio.sampleRate))
       assert.deepEqual(called, ['event1', 'event2'])
 
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, blockEnd)
       assert.deepEqual(called, ['event1', 'event2', 'event3'])
     })
@@ -82,22 +82,22 @@ describe('js-dsp.dsp-engine', function() {
 
       // frame 0, the tick advances to the first event
       blockEnd = audio.frame + audio.blockSize
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.01 * audio.sampleRate))
       assert.deepEqual(called, 0)
 
       // Event called for first time
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.035 * audio.sampleRate))
       assert.deepEqual(called, 1)
 
       // Repetition 1
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.06 * audio.sampleRate))
       assert.deepEqual(called, 2)
 
       // Repetition 2
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.085 * audio.sampleRate))
       assert.deepEqual(called, 3)
 
@@ -118,22 +118,22 @@ describe('js-dsp.dsp-engine', function() {
 
       // frame 0, the tick advances to the first event
       blockEnd = audio.frame + audio.blockSize
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.01 * audio.sampleRate))
       assert.deepEqual(called, 0)
 
       // Event called for first time
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.035 * audio.sampleRate))
       assert.deepEqual(called, 1)
 
       // Repetition 1
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.06 * audio.sampleRate))
       assert.deepEqual(called, 2)
 
       // Repetition 2
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.085 * audio.sampleRate))
       assert.deepEqual(called, 3)
     })
@@ -148,18 +148,18 @@ describe('js-dsp.dsp-engine', function() {
 
       // frame 0, the tick advances to the first event
       blockEnd = audio.frame + audio.blockSize
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.01 * audio.sampleRate))
       assert.deepEqual(called, 0)
 
       // Event called for first time
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.035 * audio.sampleRate))
       assert.deepEqual(called, 1)
 
       // unschedule
       clock.unschedule(event)
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, blockEnd)
       assert.deepEqual(called, 1)
     })
@@ -178,23 +178,23 @@ describe('js-dsp.dsp-engine', function() {
 
       // frame 0, the tick advances to the first event
       blockEnd = audio.frame + audio.blockSize
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.01 * audio.sampleRate))
       assert.deepEqual(called, 0)
 
       // Event called for first time
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, Math.floor(0.035 * audio.sampleRate))
       assert.deepEqual(called, 1)
 
       // Repetition 1
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, blockEnd)
       assert.deepEqual(called, 2)
 
       // Event should have been unscheduled
       blockEnd = audio.frame + audio.blockSize
-      audio.frame = clock.tick(blockEnd)
+      audio.frame += clock.tick(blockEnd)
       assert.equal(audio.frame, blockEnd)
       assert.deepEqual(called, 2)
     })

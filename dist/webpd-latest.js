@@ -2792,14 +2792,13 @@ Audio.prototype.tick = function() {
   while (this.frame !== blockEndFrame) {
 
     // Pulls next sub-block
-    nextFrame = pdGlob.clock.tick(blockEndFrame)
-    subBlockSize = nextFrame - this.frame
+    subBlockSize = pdGlob.clock.tick(blockEndFrame)
     if (subBlockSize) {
       for (i = 0; i < endPointsCount; i++)
         this._endPoints[i].tick(offset, subBlockSize)
     }
     offset += subBlockSize
-    this.frame = nextFrame
+    this.frame += subBlockSize
   }
 }
 
@@ -2937,16 +2936,14 @@ Clock.prototype.unschedule = function(event) {
 }
 
 // Executes the events scheduled for the current frame, and returns
-// the next frame. 
-// That next frame is either the frame of next event inside the current
-// block, or `blockEndFrame` if there are no events.  
+// the number of frames to reach next event or `blockEndFrame` if there are
+// no events in the current block.
 Clock.prototype.tick = function(blockEndFrame) {
   var frame = pdGlob.audio.frame
 
   // Remove outdated events
   while (this._events.length && this._events[0].frame < frame) {
-    this._events.shift()
-    console.error('outdated event discarded')
+    console.error('outdated event discarded', pdGlob.audio.frame, this._events.shift())
   }
 
   // Execute events that are scheduled for the current frame
@@ -2965,9 +2962,9 @@ Clock.prototype.tick = function(blockEndFrame) {
   }
 
   if (this._events.length)
-    return Math.floor(Math.min(this._events[0].frame, blockEndFrame))
+    return Math.floor(Math.min(this._events[0].frame, blockEndFrame)) - frame
   else
-    return blockEndFrame
+    return blockEndFrame - frame
 }
 
 Clock.prototype._insertEvent = function(event) {
@@ -3129,6 +3126,22 @@ var ArithmDspObject = exports.ArithmDspObject = VarOrConstantDspObject.extend({
 })
 
 
+// Baseclass for tabwrite~, tabread~ and others ...
+var TabDspObject = engine.DspObject.extend({
+
+  init: function(args) {
+    engine.DspObject.prototype.init.apply(this, arguments)
+    this.array = new mixins.Reference('array')
+  },
+
+  destroy: function() {
+    engine.DspObject.prototype.destroy.apply(this, arguments)
+    this.array.destroy()
+  }
+
+})
+
+
 exports.declareObjects = function(library) {
 
   library['dac~'] = DspEndPoint.extend({
@@ -3226,8 +3239,16 @@ exports.declareObjects = function(library) {
         message: function(args) {
           var y1 = args[0]
           var duration = args[1]
+
+          // Cancel previous ramp
+          if (this.obj._rampEndEvent) {
+            pdGlob.clock.unschedule(this.obj._rampEndEvent)
+            this.obj._rampEndEvent = null
+          }
+
+          // Start either ramp, or jump to value
           if (duration)
-            this.obj._toTickVariable(y1, duration)
+            this.obj._toTickRamp(y1, duration)
           else
             this.obj._toTickConstant(y1)
         }
@@ -3243,48 +3264,29 @@ exports.declareObjects = function(library) {
 
     _runTickConstant: function() {
       vectors.constant(this.outlets[0].getBuffer(), this.value)
-      //console.log('CCC', this.value, this.outlets[0].getBuffer().length)
     },
 
-    _runTickVariable: function() {
+    _runTickRamp: function() {
       this.value = vectors.ramp(this.outlets[0].getBuffer(), this.value, this.increment)
-      //console.log(this.value, this.outlets[0].getBuffer().length)
     },
 
     _toTickConstant: function(newValue) {
-      console.log('constant', newValue, pdGlob.audio.frame)
       this.value = newValue
       this._runTick = this._runTickConstant
     },
 
-    _toTickVariable: function(newValue, duration) {
+    _toTickRamp: function(newValue, duration) {
       var self = this
       this.increment = (newValue - this.value) / (duration * pdGlob.audio.sampleRate / 1000)
-      console.log('variable', this.increment, this.value, pdGlob.audio.frame)
-      this._runTick = this._runTickVariable
-      pdGlob.clock.schedule(function() { self._toTickConstant(newValue) }, pdGlob.audio.time + duration - 1)
+      this._runTick = this._runTickRamp
+      this._rampEndEvent = pdGlob.clock.schedule(function() { 
+        self._toTickConstant(newValue) 
+      }, pdGlob.audio.time + duration)
     }
   })
 
-
-
-  // Baseclass for tabwrite~, tabread~ and others ...
-  var TabDspObject = engine.DspObject.extend({
-
-    init: function(args) {
-      engine.DspObject.prototype.init.apply(this, arguments)
-      this.array = new mixins.Reference('array')
-    },
-
-    destroy: function() {
-      engine.DspObject.prototype.destroy.apply(this, arguments)
-      this.array.destroy()
-    }
-
-  })
 
   // TODO: tabread4~
-  // TODO: when array's data changes, this should update the node
   library['tabread~'] = TabDspObject.extend({
     type: 'tabread~',
 
@@ -3388,7 +3390,6 @@ Audio.prototype.setContext = function(context) {
     this.channelCount, this.channelCount)
 
   this._scriptProcessor.onaudioprocess = function(event) {
-    self.frame += self.blockSize
     for (ch = 0; ch < self.channelCount; ch++)
       event.outputBuffer.getChannelData(ch).set(self._buffers[ch])
     
