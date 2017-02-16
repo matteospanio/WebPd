@@ -308,4 +308,36 @@ describe('js-dsp.dsp-objects', function() {
 
   })
 
+  describe('LopHipFilter', function() {
+
+    it('should generate reasonable output signal :/', function() {
+      var osc220 = patch.createObject('osc~', [ 220 ])
+      var osc660 = patch.createObject('osc~', [ 660 ])
+      var lop1 = patch.createObject('lop~', [ 440 ])
+      var lop2 = patch.createObject('lop~', [ 440 ])
+      osc220.o(0).connect(lop1.i(0))
+      osc660.o(0).connect(lop2.i(0))
+    
+      lop1.tick(0, audio.blockSize)
+      lop2.tick(0, audio.blockSize)
+      assert.ok((_.max(lop1.o(0).getBuffer()) - _.max(lop2.o(0).getBuffer())) > 0.3)
+    })
+
+    it('should change cutoff frequency', function() {
+      var maxVal
+      var osc220 = patch.createObject('osc~', [ 220 ])
+      var lop = patch.createObject('lop~', [ 440 ])
+      osc220.o(0).connect(lop.i(0))
+    
+      lop.tick(0, audio.blockSize)
+      maxVal = _.max(lop.o(0).getBuffer())
+
+      lop.i(1).message([ 110 ])
+      audio.frame = audio.blockSize
+      lop.tick(0, audio.blockSize)
+      assert.ok((maxVal - _.max(lop.o(0).getBuffer())) > 0.3)
+    })
+
+  })
+
 })

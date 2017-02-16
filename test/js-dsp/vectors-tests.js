@@ -324,4 +324,54 @@ describe('js-dsp.vectors', function() {
 
   })
 
+  describe('lop', function() {
+
+    it('should low pass sine waves', function() {
+      var destination1, destination2, source1, source2, cutoff, coef
+      var sampleRate = 44100
+
+      destination1 = new Float32Array(44100)
+      destination2 = new Float32Array(44100)
+      source1 = new Float32Array(44100)
+      source2 = new Float32Array(44100)
+      vectors.cos(source1, 0, 220 * 2 * Math.PI  / sampleRate)
+      vectors.cos(source2, 0, 660 * 2 * Math.PI  / sampleRate)
+
+      cutoff = 440
+      coef = cutoff * 2 * Math.PI / sampleRate
+      vectors.lop(destination1, source1, 0, coef)
+      vectors.lop(destination2, source2, 0, coef)
+
+      // Sine 660hz is more attenuated than sine 220hz
+      assert.ok((_.max(destination1) - _.max(destination2)) > 0.3)
+    })
+
+  })
+
+  describe('hip', function() {
+
+    it('should hi pass sine waves', function() {
+      var destination1, destination2, source1, source2, cutoff, coef
+      var sampleRate = 44100
+
+      destination1 = new Float32Array(44100)
+      destination2 = new Float32Array(44100)
+      source1 = new Float32Array(44100)
+      source2 = new Float32Array(44100)
+      vectors.cos(source1, 0, 220 * 2 * Math.PI  / sampleRate)
+      vectors.cos(source2, 0, 660 * 2 * Math.PI  / sampleRate)
+
+      cutoff = 440
+      coef = 1 - cutoff * 2 * Math.PI / sampleRate
+      vectors.hip(destination1, source1, [0, 0], coef)
+      vectors.hip(destination2, source2, [0, 0], coef)
+
+      // Sine 220hz is more attenuated than sine 660hz
+      // We discard the beginning of the buffer for the test cause hip doesnt kick in immediatelly
+      assert.ok((_.max(destination2.slice(100)) - _.max(destination1.slice(100))) > 0.3)
+    })
+
+  })
+
+
 })
