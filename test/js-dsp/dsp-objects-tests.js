@@ -249,6 +249,7 @@ describe('js-dsp.dsp-objects', function() {
       var delread2 = patch.createObject('delread~', [ 'bla', 200 ])
       var delread3 = patch.createObject('delread~', [ 'blo', 200 ])
       source.o(0).connect(delwrite.i(0))
+      assert.equal(delwrite.delayLine().length, audio.sampleRate)
 
       source.nextBuffer = new Float32Array([ 1, 2, 3, 4, 5 ])
       nextBlockSize = clock.tick(audio.frame + audio.blockSize)

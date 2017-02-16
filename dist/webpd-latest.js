@@ -3349,13 +3349,10 @@ exports.declareObjects = function(library) {
     init: function(args) {
       engine.DspEndPoint.prototype.init.apply(this, arguments)
       var name = args[0]
-      this.delayLine = new Float32Array(args[1] || 1000)
+      this._delayLineSize = (args[1] || 1000) / 1000 // in seconds
+      this._delayLine = null
       this._position = 0
       if (name) this.setName(name)
-    },
-
-    start: function() {
-      engine.DspEndPoint.prototype.start.apply(this, arguments)
     },
 
     destroy: function() {
@@ -3364,15 +3361,21 @@ exports.declareObjects = function(library) {
       mixins.EventEmitterMixin.destroy.apply(this, arguments)
     },
 
+    delayLine: function() {
+      if (!this._delayLine)
+        this._delayLine = new Float32Array(this._delayLineSize * pdGlob.audio.sampleRate)
+      return this._delayLine
+    },
+
     getDelayedPosition: function(delayFrames) {
       var delayedPosition = this._position - delayFrames
       while (delayedPosition < 0)
-        delayedPosition += this.delayLine.length
+        delayedPosition += this.delayLine().length
       return delayedPosition
     },
 
     _runTick: function() {
-      this._position = vectors.circularBufferWrite(this.delayLine, this.i(0).getBuffer(), this._position)
+      this._position = vectors.circularBufferWrite(this.delayLine(), this.i(0).getBuffer(), this._position)
     }
 
   })
@@ -3398,9 +3401,7 @@ exports.declareObjects = function(library) {
       this._delWrite = new mixins.Reference('delwrite~')
       this._delWrite.on('changed', function() {
         self._updateRunTick()
-        // Update the read position
-        if (self._delWrite.resolved)
-          self._position = self._delWrite.resolved.getDelayedPosition(self._delayFrames)
+        self._updatePosition()
       })
 
       this._delayTime = args[1] || 0
@@ -3421,6 +3422,10 @@ exports.declareObjects = function(library) {
     setDelayTime: function(delayTime) {
       this._delayTime = delayTime
       this._delayFrames = Math.round(pdGlob.audio.sampleRate * delayTime / 1000)
+      this._updatePosition()
+    },
+
+    _updatePosition: function() {
       if (this._delWrite.resolved)
         this._position = this._delWrite.resolved.getDelayedPosition(this._delayFrames)
     },
@@ -3431,7 +3436,7 @@ exports.declareObjects = function(library) {
 
     _runTickReadDelay: function() {
       this._position = vectors.circularBufferRead(
-        this.o(0).getBuffer(), this._delWrite.resolved.delayLine, this._position)
+        this.o(0).getBuffer(), this._delWrite.resolved.delayLine(), this._position)
     },
 
     _updateRunTick: function() {
@@ -3443,8 +3448,71 @@ exports.declareObjects = function(library) {
 
   })
 
+  /*
+  library['lop~'] = Pd.Object.extend({
 
-  library['lop~'] = null
+    inletDefs: [ portlets.DspInlet, portlets.Inlet ],
+    outletDefs: ['outlet~'],
+
+      init: function(freq) {
+          this.ym1 = 0;
+          this.setCutOffFreq(freq || 0);
+          // Only zeros when no dsp connected 
+          this.dspTick = this.dspTickZeros;
+          this.on('inletConnect', this._onInletConnect);
+          this.on('inletDisconnect', this._onInletDisconnect);
+      },
+
+      load: function() {
+          this.setCutOffFreq(this.cutOffFreq);
+      },
+
+      // TODO: recalculate when sample rate changes.
+      setCutOffFreq: function(freq) {
+          this.assertIsNumber(freq, 'invalid cut-off frequency ' + freq);
+          this.cutOffFreq = freq;
+          freq = Math.max(0, freq);
+          this.coef = freq * 2 * Math.PI / this.patch.sampleRate;
+          this.coef = Math.max(0, this.coef);
+          this.coef = Math.min(1, this.coef);
+      },
+
+      dspTickFiltering: function() {
+          var inBuff = this.inlets[0].getBuffer(),
+              outBuff = this.outlets[0].getBuffer(),
+              coef = this.coef, i, length;
+
+          // y[i] := y[i-1] + α * (x[i] - y[i-1]) | source : wikipedia
+          outBuff[0] = this.ym1 + coef * (inBuff[0] - this.ym1);
+          for (i = 1, length = outBuff.length; i < length; i++) {
+              outBuff[i] = outBuff[i-1] + coef * (inBuff[i] - outBuff[i-1]);
+          }
+          this.ym1 = outBuff[length-1];
+      },
+
+      message: function(inletId, msg) {
+          if (inletId === 0) {
+              if (msg === 'clear') this.ym1 = 0;
+          } else if (inletId === 1) {
+              this.setCutOffFreq(msg);
+          }
+      },
+
+      // On inlet connection, we change dspTick method if appropriate
+      _onInletConnect: function() {
+          if (this.inlets[0].hasDspSources()) {
+              this.dspTick = this.dspTickFiltering;
+          }
+      },
+
+      // On inlet disconnection, we change dspTick method if appropriate
+      _onInletDisconnect: function() {
+          if (!this.inlets[0].hasDspSources()) {
+              this.dspTick = this.dspTickZeros;
+          }
+      }
+});
+*/
   library['hip~'] = null
   library['bp~'] = null
   library['vcf~'] = null
