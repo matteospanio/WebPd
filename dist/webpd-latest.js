@@ -3000,6 +3000,7 @@ Clock.prototype._insertEvent = function(event) {
 var _ = require('underscore')
   , utils = require('../core/utils')
   , PdObject = require('../core/PdObject')
+  , mixins = require('../core/mixins')
   , pdGlob = require('../global')
   , portlets = require('./portlets')
   , vectors = require('./vectors')
@@ -3265,17 +3266,91 @@ exports.declareObjects = function(library) {
     }
   })
 
+
+
+  // Baseclass for tabwrite~, tabread~ and others ...
+  var TabDspObject = engine.DspObject.extend({
+
+    init: function(args) {
+      engine.DspObject.prototype.init.apply(this, arguments)
+      this.array = new mixins.Reference('array')
+    },
+
+    destroy: function() {
+      engine.DspObject.prototype.destroy.apply(this, arguments)
+      this.array.destroy()
+    }
+
+  })
+
+  // TODO: tabread4~
+  // TODO: when array's data changes, this should update the node
+  library['tabread~'] = TabDspObject.extend({
+    type: 'tabread~',
+
+    inletDefs: [
+      portlets.DspInlet.extend({
+        
+        message: function(args) {
+          var method = args[0]
+          if (method === 'set')
+            this.obj.array.set(args[1])
+          else
+            console.error('unknown method ' + method)
+        },
+
+        connection: function() {
+          portlets.DspInlet.prototype.connection.apply(this, arguments)
+          this.obj._updateRunTick()
+        },
+
+        disconnection: function() {
+          portlets.DspInlet.prototype.disconnection.apply(this, arguments)
+          this.obj._updateRunTick()
+        }
+
+      })
+    ],
+    outletDefs: [portlets.DspOutlet],
+
+    init: function(args) {
+      var arrayName = args[0]
+      var self = this
+      TabDspObject.prototype.init.apply(this, arguments)
+      this.array.on('changed', function() { self._updateRunTick() })
+      if (arrayName) this.array.set(arrayName)
+    },
+
+    _runTickInterpolate: function() {
+      vectors.linearInterpolation(this.o(0).getBuffer(), this.array.resolved.data, this.i(0).getBuffer())
+    },
+
+    _runTickZeros: function() {
+      vectors.constant(this.o(0).getBuffer(), 0)
+    },
+
+    _updateRunTick: function() {
+      if (this.i(0).dspSources.length && this.array.resolved)
+        this._runTick = this._runTickInterpolate
+      else
+        this._runTick = this._runTickZeros
+    }
+
+  })
+
+
+  library['delwrite~'] = null
+  library['delread~'] = null
+
+
   library['lop~'] = null
   library['hip~'] = null
   library['bp~'] = null
   library['vcf~'] = null
-  library['tabread~'] = null
-  library['delwrite~'] = null
-  library['delread~'] = null
   library['clip~'] = null
   library['adc~'] = null
 }
-},{"../core/PdObject":6,"../core/utils":11,"../global":12,"./dsp-engine":15,"./portlets":18,"./vectors":19,"underscore":39}],17:[function(require,module,exports){
+},{"../core/PdObject":6,"../core/mixins":9,"../core/utils":11,"../global":12,"./dsp-engine":15,"./portlets":18,"./vectors":19,"underscore":39}],17:[function(require,module,exports){
 /*
  * Copyright (c) 2011-2017 Chris McCormick, Sébastien Piquemal <sebpiq@gmail.com>
  *
@@ -3702,6 +3777,18 @@ exports.ramp = function(destination, value, step) {
     destination[i] = value
   }
   return value
+}
+
+exports.linearInterpolation = function(destination, values, indices) {
+  var i, x, x1, y1, y2
+  var length = destination.length
+  for (i = 0; i < length; i++) {
+    x = indices[i]
+    x1 = Math.floor(x)
+    y1 = values[x1]
+    y2 = values[Math.ceil(x)]
+    destination[i] = y1 + (x - x1) * (y2 - y1)
+  }
 }
 },{}],20:[function(require,module,exports){
 /*

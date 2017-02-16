@@ -242,4 +242,24 @@ describe('js-dsp.vectors', function() {
 
   })
 
+  describe('linearInterpolation', function() {
+
+    it('should interpolate the indices in the table', function() {
+      var destination, indices, values
+
+      destination = new Float32Array(5)
+      values = new Float32Array([ 1, 2, 3, 4, 5 ])
+      indices = new Float32Array([ 1.45, 3.4, 2.9, 0, 4 ])
+      vectors.linearInterpolation(destination, values, indices)
+      helpers.assertAboutEqual(destination, new Float32Array([ 2.45, 4.4, 3.9, 1, 5 ]))
+
+      destination = new Float32Array(3)
+      values = new Float32Array([ 0, 3, 2, 6, -4 ])
+      indices = new Float32Array([ 0.5, 2.25, 3.2 ])
+      vectors.linearInterpolation(destination, values, indices)
+      helpers.assertAboutEqual(destination, new Float32Array([ 1.5, 3, 4 ]))
+    })
+
+  })
+
 })

@@ -168,4 +168,42 @@ describe('js-dsp.dsp-objects', function() {
 
   })
 
+
+  describe('tabread~', function() {
+
+    it('should interpolate from the array with corresponding name', function() {
+      var array = patch.createObject('array', [ 'bla', 10 ])
+      var tabread = patch.createObject('tabread~', [ 'bla' ])
+      var indices = patch.createObject('DummySourceObject')
+
+      assert.equal(tabread.array.resolved, array)
+      array.data = new Float32Array([ 0, 2, 4, 6, 8, 10, 12, 14, 16, 18 ])
+
+      indices.o(0).connect(tabread.i(0))
+      indices.nextBuffer = new Float32Array([ 1.5, 2, 3, 4 ])
+      tabread.tick(0, 4)
+      helpers.assertAboutEqual(tabread.o(0).getBuffer(), new Float32Array([ 3, 4, 6, 8 ]))
+    })
+
+    it('should resolve new array if changing name', function() {
+      var array = patch.createObject('array', [ 'blo', 10 ])
+      var tabread = patch.createObject('tabread~', [ 'bla' ])
+      var indices = patch.createObject('DummySourceObject')
+
+      assert.equal(tabread.array.resolved, null)
+      array.data = new Float32Array([ 0, 2, 4, 6, 8, 10, 12, 14, 16, 18 ])
+
+      indices.o(0).connect(tabread.i(0))
+      indices.nextBuffer = new Float32Array([ 1.5, 2, 3, 4 ])
+      tabread.tick(0, 4)
+      helpers.assertAboutEqual(tabread.o(0).getBuffer(), new Float32Array([ 0, 0, 0, 0 ]))
+
+      audio.frame = 4
+      indices.nextBuffer = new Float32Array([ 1.5, 2, 3, 4 ])
+      tabread.i(0).message([ 'set', 'blo' ])
+      assert.equal(tabread.array.resolved, array)
+    })
+
+  })
+
 })
